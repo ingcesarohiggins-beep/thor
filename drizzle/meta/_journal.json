@@ -15,6 +15,13 @@
       "when": 1785807525249,
       "tag": "0001_red_lady_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785808821095,
+      "tag": "0002_big_hobgoblin",
+      "breakpoints": true
     }
   ]
 }

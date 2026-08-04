@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Section = "inicio" | "inventario" | "ventas" | "transferencias" | "caja";
 type StockItem = { id: string; name: string; detail: string; price: number; qty: number; kind: "Equipo" | "Accesorio" };
+type DashboardMetrics = { salesToday: number; expensesToday: number; stockValue: number; availableItems: number };
 
 const initialStock: StockItem[] = [
   { id: "CEL-000128", name: "Samsung Galaxy A56 5G", detail: "256 GB · IMEI terminado en 8492", price: 1299, qty: 1, kind: "Equipo" },
@@ -18,6 +19,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<StockItem[]>([]);
   const [notice, setNotice] = useState("Operación segura: toda venta se valida al confirmar.");
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [newItem, setNewItem] = useState("");
   const items = useMemo(() => initialStock.filter((item) => `${item.id} ${item.name} ${item.detail}`.toLowerCase().includes(query.toLowerCase())), [query]);
@@ -27,20 +29,56 @@ export default function Home() {
     setCart((current) => [...current, item]);
     setNotice(`${item.name} se agregó a la venta.`);
   };
-  const register = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setRegisterOpen(false); setNotice(`Entrada de ${newItem} creada y pendiente de aprobación.`); setNewItem("");
+  useEffect(() => {
+    async function connect() {
+      try {
+        const setup = await fetch("/api/setup");
+        const initial = await setup.json() as { initialized?: boolean; error?: string };
+        if (!setup.ok) throw new Error(initial.error);
+        if (!initial.initialized) {
+          const created = await fetch("/api/setup", { method: "POST" });
+          const payload = await created.json() as { error?: string };
+          if (!created.ok) throw new Error(payload.error);
+        }
+        const dashboard = await fetch("/api/dashboard");
+        const payload = await dashboard.json() as { metrics?: DashboardMetrics; error?: string };
+        if (!dashboard.ok) throw new Error(payload.error);
+        setMetrics(payload.metrics ?? null);
+        setNotice("Base de datos THOR conectada. Almacén Central listo para operar.");
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "No se pudo conectar la base de datos todavía.");
+      }
+    }
+    void connect();
+  }, []);
+  const register = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const photo = form.get("photo");
+    if (!(photo instanceof File) || !photo.size) return setNotice("Debes adjuntar una foto del equipo.");
+    try {
+      setNotice("Subiendo foto y registrando equipo…");
+      const uploadData = new FormData(); uploadData.set("file", photo);
+      const upload = await fetch("/api/uploads", { method: "POST", body: uploadData });
+      const uploaded = await upload.json() as { key?: string; error?: string };
+      if (!upload.ok || !uploaded.key) throw new Error(uploaded.error);
+      const saved = await fetch("/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newItem, sku: form.get("sku"), category: form.get("category"), imei1: form.get("identifier"), photoKey: uploaded.key, cost: Number(form.get("cost") || 0), price: Number(form.get("price") || 0) }) });
+      const result = await saved.json() as { error?: string };
+      if (!saved.ok) throw new Error(result.error);
+      setRegisterOpen(false); setNewItem(""); setNotice(`Equipo ${newItem} registrado correctamente en Almacén Central.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo registrar el equipo."); }
   };
 
   return <main className="thor-app">
     <aside className="side-nav"><div className="brand"><span className="bolt">ϟ</span><span>THOR</span></div><p className="location-label">SEDE ACTIVA</p><button className="location">Almacén Central <span>⌄</span></button><nav><Nav icon="⌂" label="Inicio" active={section === "inicio"} onClick={() => setSection("inicio")} /><Nav icon="▦" label="Inventario" active={section === "inventario"} onClick={() => setSection("inventario")} /><Nav icon="▱" label="Ventas" active={section === "ventas"} onClick={() => setSection("ventas")} /><Nav icon="↔" label="Transferencias" active={section === "transferencias"} onClick={() => setSection("transferencias")} /><Nav icon="◫" label="Caja" active={section === "caja"} onClick={() => setSection("caja")} /></nav><div className="profile"><span className="avatar">AM</span><div><strong>Administrador</strong><small>Almacén Central</small></div></div></aside>
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">LUNES, 3 DE AGOSTO</p><h1>{titles[section]}</h1></div><div className="top-actions"><button className="icon-button" aria-label="Notificaciones">♧<i /></button><button className="quick" onClick={() => setSection("ventas")}>＋ Nueva venta</button></div></header><div className="notice" role="status"><span>✓</span>{notice}</div>
-      {section === "inicio" && <Dashboard go={setSection} />}
+      {section === "inicio" && <Dashboard go={setSection} metrics={metrics} />}
       {section === "inventario" && <Inventory items={items} query={query} setQuery={setQuery} add={add} onRegister={() => setRegisterOpen(true)} />}
       {section === "ventas" && <Sales items={items} query={query} setQuery={setQuery} cart={cart} add={add} total={total} remove={(index) => setCart(cart.filter((_, itemIndex) => itemIndex !== index))} confirm={() => { setCart([]); setNotice("Venta validada. El comprobante está listo para compartir por WhatsApp."); }} />}
       {section === "transferencias" && <Transfers />}{section === "caja" && <Cash />}
     </section>
     <nav className="mobile-nav"><Nav icon="⌂" label="Inicio" active={section === "inicio"} onClick={() => setSection("inicio")} /><Nav icon="▦" label="Stock" active={section === "inventario"} onClick={() => setSection("inventario")} /><Nav icon="＋" label="Vender" active={section === "ventas"} onClick={() => setSection("ventas")} /><Nav icon="◫" label="Caja" active={section === "caja"} onClick={() => setSection("caja")} /></nav>
-    {registerOpen && <div className="modal-backdrop"><form className="modal" onSubmit={register}><button type="button" className="close" onClick={() => setRegisterOpen(false)}>×</button><p className="eyebrow">ENTRADA PENDIENTE</p><h2>Registrar equipo</h2><p>Escanea con la cámara el IMEI o código y envía la entrada para aprobación.</p><label>Marca y modelo<input required autoFocus value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Ej. Samsung Galaxy A56" /></label><label>IMEI, serial o código<input required placeholder="Escanear o escribir" /></label><label>Foto del equipo<input required type="file" accept="image/*" capture="environment" /></label><button className="primary" type="submit">Guardar solicitud</button></form></div>}
+    {registerOpen && <div className="modal-backdrop"><form className="modal" onSubmit={register}><button type="button" className="close" onClick={() => setRegisterOpen(false)}>×</button><p className="eyebrow">ENTRADA DE INVENTARIO</p><h2>Registrar equipo</h2><p>Escanea con la cámara el IMEI o código. La foto es obligatoria.</p><label>Marca y modelo<input required autoFocus value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Ej. Samsung Galaxy A56" /></label><label>Tipo<select name="category" defaultValue="phone"><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>SKU interno<input name="sku" required placeholder="Ej. SAM-A56-256" /></label><label>IMEI, serial o código<input name="identifier" required placeholder="Escanear o escribir" /></label><div className="two-fields"><label>Costo (S/)<input name="cost" type="number" min="0" step="0.01" required /></label><label>Precio (S/)<input name="price" type="number" min="0" step="0.01" required /></label></div><label>Foto del equipo<input name="photo" required type="file" accept="image/*" capture="environment" /></label><button className="primary" type="submit">Guardar equipo</button></form></div>}
   </main>;
 }
 
@@ -49,7 +87,7 @@ function Nav({ icon, label, active, onClick }: { icon: string; label: string; ac
 function Metric({ label, value, note }: { label: string; value: string; note: string }) { return <section className="metric"><p>{label}</p><strong>{value}</strong><small>{note}</small></section>; }
 function Movement({ icon, color, title, note, value }: { icon: string; color: string; title: string; note: string; value: string }) { return <div className="movement"><span className={`movement-icon ${color}`}>{icon}</span><div><strong>{title}</strong><small>{note}</small></div><b>{value}</b></div>; }
 
-function Dashboard({ go }: { go: (section: Section) => void }) { return <div className="content"><div className="hero"><div><p className="eyebrow">RESUMEN DE HOY</p><h2>Todo bajo control.</h2><p>Revisa tus ventas, caja e inventario en un solo lugar.</p></div><button className="primary" onClick={() => go("ventas")}>＋ Registrar venta</button></div><div className="metrics"><Metric label="Ventas del día" value="S/ 4,286.00" note="↑ 18% vs. ayer" /><Metric label="Utilidad estimada" value="S/ 1,174.60" note="27.4% de margen" /><Metric label="Gastos del día" value="S/ 86.50" note="3 gastos registrados" /><Metric label="Inventario valorizado" value="S/ 148,690.00" note="Almacén Central" /></div><div className="split"><section className="card"><div className="card-head"><div><p className="eyebrow">ACTIVIDAD</p><h3>Últimos movimientos</h3></div><button className="text-button">Ver todo</button></div><Movement icon="↑" color="gold" title="Venta V-AC-000021" note="iPhone 15 · Cliente General" value="S/ 2,899.00" /><Movement icon="↔" color="blue" title="Transferencia T-000013" note="4 productos hacia Tienda San Miguel" value="En tránsito" /><Movement icon="↓" color="green" title="Lote L-000008 registrado" note="Proveedor: Tecno Perú S.A.C." value="Pendiente" /></section><section className="card"><div className="card-head"><div><p className="eyebrow">ATENCIÓN</p><h3>Stock por reponer</h3></div><span className="badge warning">3 alertas</span></div><Alert name="Cargador Samsung 25 W" qty="2 unidades" /><Alert name="Cable Lightning 1 m" qty="3 unidades" /><Alert name="iPhone 15 128 GB" qty="1 unidad" /></section></div></div>; }
+function Dashboard({ go, metrics }: { go: (section: Section) => void; metrics: DashboardMetrics | null }) { return <div className="content"><div className="hero"><div><p className="eyebrow">RESUMEN DE HOY</p><h2>Todo bajo control.</h2><p>Revisa tus ventas, caja e inventario en un solo lugar.</p></div><button className="primary" onClick={() => go("ventas")}>＋ Registrar venta</button></div><div className="metrics"><Metric label="Ventas del día" value={metrics ? money.format(metrics.salesToday) : "—"} note="Ventas confirmadas" /><Metric label="Utilidad estimada" value="—" note="Se calcula al ingresar costos" /><Metric label="Gastos del día" value={metrics ? money.format(metrics.expensesToday) : "—"} note="Gastos registrados" /><Metric label="Inventario valorizado" value={metrics ? money.format(metrics.stockValue) : "—"} note={metrics ? `${metrics.availableItems} registros disponibles` : "Conectando inventario"} /></div><div className="split"><section className="card"><div className="card-head"><div><p className="eyebrow">ACTIVIDAD</p><h3>Últimos movimientos</h3></div><button className="text-button">Ver todo</button></div><Movement icon="↑" color="gold" title="Venta V-AC-000021" note="La actividad real aparecerá aquí" value="Pendiente" /><Movement icon="↔" color="blue" title="Transferencias" note="Flujo con aprobación de administrador" value="Listo" /><Movement icon="↓" color="green" title="Lotes de proveedor" note="Se registran y aprueban antes de aumentar stock" value="Listo" /></section><section className="card"><div className="card-head"><div><p className="eyebrow">ATENCIÓN</p><h3>Stock por reponer</h3></div><span className="badge warning">Próximamente</span></div><Alert name="Alertas por mínimo" qty="Se activan al registrar productos" /><Alert name="Inventario físico" qty="Escaneo QR disponible en la siguiente operación" /></section></div></div>; }
 function Alert({ name, qty }: { name: string; qty: string }) { return <div className="alert-row"><span>!</span><div><strong>{name}</strong><small>{qty}</small></div><button>Reponer</button></div>; }
 
 function Inventory({ items, query, setQuery, add, onRegister }: { items: StockItem[]; query: string; setQuery: (value: string) => void; add: (item: StockItem) => void; onRegister: () => void }) { return <div className="content"><div className="page-actions"><Search query={query} setQuery={setQuery} placeholder="Buscar por nombre, IMEI, serial o código" /><button className="primary" onClick={onRegister}>＋ Registrar equipo</button></div><section className="card table-card"><div className="filters"><button className="filter selected">Todos <b>34</b></button><button className="filter">Equipos</button><button className="filter">Accesorios</button><button className="filter">Bajo stock</button></div>{items.map((item) => <article className="inventory-row" key={item.id}><div className="product-image">{item.kind === "Equipo" ? "▣" : "⌁"}</div><div className="product"><strong>{item.name}</strong><small>{item.id} · {item.detail}</small></div><span className="badge success">Disponible</span><div className="price"><strong>{money.format(item.price)}</strong><small>{item.qty} {item.qty === 1 ? "unidad" : "unidades"}</small></div><button className="row-action" onClick={() => add(item)}>Agregar a venta</button></article>)}</section></div>; }
