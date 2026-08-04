@@ -1,44 +1,35 @@
-import { count } from "drizzle-orm";
-import { getDb } from "../../../db";
-import { locations, users } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
-
-const now = () => new Date().toISOString();
+import { getSupabaseAdmin } from "../../../db/supabase";
+import { requireAuthenticatedUser } from "../_lib/auth";
 
 export async function GET() {
   try {
-    const db = getDb();
-    const [result] = await db.select({ value: count() }).from(users);
-    return Response.json({ initialized: result.value > 0 });
+    const { count, error } = await getSupabaseAdmin().from("app_users").select("id", { count: "exact", head: true });
+    if (error) throw error;
+    return Response.json({ initialized: (count ?? 0) > 0 });
   } catch (error) {
     return Response.json({ error: message(error) }, { status: 500 });
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const identity = await getChatGPTUser();
-    if (!identity) return Response.json({ error: "Inicia sesión para configurar THOR." }, { status: 401 });
-
-    const db = getDb();
-    const [existing] = await db.select({ value: count() }).from(users);
-    if (existing.value > 0) return Response.json({ error: "THOR ya fue configurado." }, { status: 409 });
-
-    const timestamp = now();
-    const locationId = crypto.randomUUID();
-    const userId = crypto.randomUUID();
-    const username = (identity.email.split("@")[0] || "admin").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 36) || "admin";
-    await db.batch([
-      db.insert(locations).values({ id: locationId, name: "Almacén Central", type: "central", active: true, createdAt: timestamp, updatedAt: timestamp }),
-      db.insert(users).values({ id: userId, externalId: identity.userId, name: identity.fullName ?? identity.email, email: identity.email, username, role: "superadmin", locationId, active: true, createdAt: timestamp, updatedAt: timestamp }),
-    ]);
-    return Response.json({ locationId, userId, role: "superadmin" }, { status: 201 });
+    const identity = await requireAuthenticatedUser(request);
+    const db = getSupabaseAdmin();
+    const { count, error: countError } = await db.from("app_users").select("id", { count: "exact", head: true });
+    if (countError) throw countError;
+    if ((count ?? 0) > 0) return Response.json({ error: "THOR ya fue configurado. Pide al administrador que habilite tu usuario." }, { status: 409 });
+    const location = await db.from("locations").insert({ name: "Almacén Central", type: "central", active: true }).select("id").single();
+    if (location.error || !location.data) throw location.error ?? new Error("No se pudo crear el almacén central.");
+    const email = identity.email ?? "admin@thor.local";
+    const username = (email.split("@")[0] || "admin").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 36) || "admin";
+    const user = await db.from("app_users").insert({ auth_user_id: identity.id, name: identity.user_metadata.full_name || identity.user_metadata.name || email, email, username, role: "superadmin", location_id: location.data.id, active: true }).select("id, role").single();
+    if (user.error || !user.data) throw user.error ?? new Error("No se pudo crear el superadministrador.");
+    return Response.json({ locationId: location.data.id, userId: user.data.id, role: user.data.role }, { status: 201 });
   } catch (error) {
     return Response.json({ error: message(error) }, { status: 500 });
   }
 }
 
 function message(error: unknown) {
-  const text = error instanceof Error ? error.message : "No se pudo preparar la base de datos.";
-  return text.includes("no such table") ? "La base de datos aún está preparando sus tablas. Intenta nuevamente en unos segundos." : text;
+  return error instanceof Error ? error.message : "No se pudo preparar la base de datos.";
 }

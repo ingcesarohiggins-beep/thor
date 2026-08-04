@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Login, SetupNeeded } from "./login";
+import { getSupabaseBrowser } from "./lib/supabase-browser";
 
 type Section = "inicio" | "inventario" | "ventas" | "transferencias" | "caja";
 type StockItem = { id: string; name: string; detail: string; price: number; qty: number; kind: "Equipo" | "Accesorio" };
@@ -20,9 +22,11 @@ export default function Home() {
   const [cart, setCart] = useState<StockItem[]>([]);
   const [notice, setNotice] = useState("Operación segura: toda venta se valida al confirmar.");
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [stock, setStock] = useState<StockItem[]>(initialStock);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [newItem, setNewItem] = useState("");
-  const items = useMemo(() => initialStock.filter((item) => `${item.id} ${item.name} ${item.detail}`.toLowerCase().includes(query.toLowerCase())), [query]);
+  const items = useMemo(() => stock.filter((item) => `${item.id} ${item.name} ${item.detail}`.toLowerCase().includes(query.toLowerCase())), [query, stock]);
   const total = cart.reduce((sum, item) => sum + item.price, 0);
   const add = (item: StockItem) => {
     if (item.qty === 1 && cart.some((entry) => entry.id === item.id)) return;
@@ -30,27 +34,43 @@ export default function Home() {
     setNotice(`${item.name} se agregó a la venta.`);
   };
   useEffect(() => {
+    const supabase = getSupabaseBrowser();
+    if (!supabase) return;
+    void supabase.auth.getSession().then(({ data }) => setAccessToken(data.session?.access_token ?? null));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setAccessToken(session?.access_token ?? null));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+  useEffect(() => {
     async function connect() {
+      if (!accessToken) return;
       try {
-        const setup = await fetch("/api/setup");
+        const headers = { authorization: `Bearer ${accessToken}` };
+        const setup = await fetch("/api/setup", { headers });
         const initial = await setup.json() as { initialized?: boolean; error?: string };
         if (!setup.ok) throw new Error(initial.error);
         if (!initial.initialized) {
-          const created = await fetch("/api/setup", { method: "POST" });
+          const created = await fetch("/api/setup", { method: "POST", headers });
           const payload = await created.json() as { error?: string };
           if (!created.ok) throw new Error(payload.error);
         }
-        const dashboard = await fetch("/api/dashboard");
+        const dashboard = await fetch("/api/dashboard", { headers });
         const payload = await dashboard.json() as { metrics?: DashboardMetrics; error?: string };
         if (!dashboard.ok) throw new Error(payload.error);
         setMetrics(payload.metrics ?? null);
+        const inventory = await fetch("/api/inventory", { headers });
+        const inventoryPayload = await inventory.json() as { serialized?: Array<{ code: string; name: string; imei1?: string | null; serial?: string | null; price: number }>; accessories?: Array<{ productId: string; sku: string; name: string; quantity: number; price: number }>; error?: string };
+        if (!inventory.ok) throw new Error(inventoryPayload.error);
+        setStock([
+          ...(inventoryPayload.serialized ?? []).map((item) => ({ id: item.code, name: item.name, detail: item.imei1 ? `IMEI terminado en ${item.imei1.slice(-4)}` : item.serial ? `Serie ${item.serial}` : "Equipo serializado", price: item.price, qty: 1, kind: "Equipo" as const })),
+          ...(inventoryPayload.accessories ?? []).map((item) => ({ id: item.sku, name: item.name, detail: `SKU ${item.sku}`, price: item.price, qty: item.quantity, kind: "Accesorio" as const })),
+        ]);
         setNotice("Base de datos THOR conectada. Almacén Central listo para operar.");
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "No se pudo conectar la base de datos todavía.");
       }
     }
     void connect();
-  }, []);
+  }, [accessToken]);
   const register = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -59,16 +79,20 @@ export default function Home() {
     try {
       setNotice("Subiendo foto y registrando equipo…");
       const uploadData = new FormData(); uploadData.set("file", photo);
-      const upload = await fetch("/api/uploads", { method: "POST", body: uploadData });
+      if (!accessToken) throw new Error("Inicia sesión para registrar inventario.");
+      const upload = await fetch("/api/uploads", { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: uploadData });
       const uploaded = await upload.json() as { key?: string; error?: string };
       if (!upload.ok || !uploaded.key) throw new Error(uploaded.error);
-      const saved = await fetch("/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newItem, sku: form.get("sku"), category: form.get("category"), imei1: form.get("identifier"), photoKey: uploaded.key, cost: Number(form.get("cost") || 0), price: Number(form.get("price") || 0) }) });
+      const saved = await fetch("/api/inventory", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ name: newItem, sku: form.get("sku"), category: form.get("category"), imei1: form.get("identifier"), photoKey: uploaded.key, cost: Number(form.get("cost") || 0), price: Number(form.get("price") || 0) }) });
       const result = await saved.json() as { error?: string };
       if (!saved.ok) throw new Error(result.error);
       setRegisterOpen(false); setNewItem(""); setNotice(`Equipo ${newItem} registrado correctamente en Almacén Central.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo registrar el equipo."); }
   };
 
+  const supabase = getSupabaseBrowser();
+  if (!supabase) return <SetupNeeded />;
+  if (!accessToken) return <Login onAuthenticated={() => setNotice("Sesión iniciada. Conectando THOR…")} />;
   return <main className="thor-app">
     <aside className="side-nav"><div className="brand"><span className="bolt">ϟ</span><span>THOR</span></div><p className="location-label">SEDE ACTIVA</p><button className="location">Almacén Central <span>⌄</span></button><nav><Nav icon="⌂" label="Inicio" active={section === "inicio"} onClick={() => setSection("inicio")} /><Nav icon="▦" label="Inventario" active={section === "inventario"} onClick={() => setSection("inventario")} /><Nav icon="▱" label="Ventas" active={section === "ventas"} onClick={() => setSection("ventas")} /><Nav icon="↔" label="Transferencias" active={section === "transferencias"} onClick={() => setSection("transferencias")} /><Nav icon="◫" label="Caja" active={section === "caja"} onClick={() => setSection("caja")} /></nav><div className="profile"><span className="avatar">AM</span><div><strong>Administrador</strong><small>Almacén Central</small></div></div></aside>
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">LUNES, 3 DE AGOSTO</p><h1>{titles[section]}</h1></div><div className="top-actions"><button className="icon-button" aria-label="Notificaciones">♧<i /></button><button className="quick" onClick={() => setSection("ventas")}>＋ Nueva venta</button></div></header><div className="notice" role="status"><span>✓</span>{notice}</div>

@@ -1,19 +1,22 @@
-import { and, eq, sql } from "drizzle-orm";
-import { getDb } from "../../../db";
-import { expenses, inventoryItems, products, sales, stockBalances } from "../../../db/schema";
-import { requireActor } from "../_lib/actor";
+import { getSupabaseAdmin } from "../../../db/supabase";
+import { requireActor } from "../_lib/auth";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const actor = await requireActor();
-    const db = getDb();
+    const actor = await requireActor(request);
+    if (!actor.locationId) throw new Error("Tu cuenta no tiene una sede asignada.");
+    const db = getSupabaseAdmin();
     const today = new Date().toISOString().slice(0, 10);
-    const location = actor.locationId;
-    const [salesToday] = await db.select({ total: sql<number>`coalesce(sum(${sales.total}), 0)` }).from(sales).where(and(eq(sales.locationId, location!), eq(sales.status, "completed"), sql`${sales.createdAt} >= ${today}`));
-    const [expensesToday] = await db.select({ total: sql<number>`coalesce(sum(${expenses.amount}), 0)` }).from(expenses).where(sql`${expenses.createdAt} >= ${today}`);
-    const [stockValue] = await db.select({ total: sql<number>`coalesce(sum(${stockBalances.quantity} * ${stockBalances.averageCost}), 0)` }).from(stockBalances).where(eq(stockBalances.locationId, location!));
-    const [items] = await db.select({ total: sql<number>`count(*)` }).from(inventoryItems).innerJoin(products, eq(inventoryItems.productId, products.id)).where(and(eq(inventoryItems.locationId, location!), eq(inventoryItems.status, "available")));
-    return Response.json({ actor: { id: actor.id, name: actor.name, role: actor.role, locationId: actor.locationId }, metrics: { salesToday: salesToday.total, expensesToday: expensesToday.total, stockValue: stockValue.total, availableItems: items.total } });
+    const [sales, expenses, balances, items] = await Promise.all([
+      db.from("sales").select("total").eq("location_id", actor.locationId).eq("status", "completed").gte("created_at", today),
+      db.from("expenses").select("amount").eq("location_id", actor.locationId).gte("expense_date", today),
+      db.from("stock_balances").select("quantity, average_cost").eq("location_id", actor.locationId),
+      db.from("inventory_items").select("id", { count: "exact", head: true }).eq("location_id", actor.locationId).eq("status", "available"),
+    ]);
+    for (const result of [sales, expenses, balances, items]) if (result.error) throw result.error;
+    const sum = (rows: Array<Record<string, number>> | null, field: string) => (rows ?? []).reduce((total, row) => total + Number(row[field] ?? 0), 0);
+    const stockValue = (balances.data ?? []).reduce((total, row) => total + Number(row.quantity) * Number(row.average_cost), 0);
+    return Response.json({ actor, metrics: { salesToday: sum(sales.data as Array<Record<string, number>>, "total"), expensesToday: sum(expenses.data as Array<Record<string, number>>, "amount"), stockValue, availableItems: items.count ?? 0 } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "No se pudo obtener el panel." }, { status: 401 });
   }
