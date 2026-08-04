@@ -1,46 +1,32 @@
 # THOR · Inventario, ventas y caja
 
-Sistema móvil para gestionar equipos y accesorios: inventario por almacén, ventas, caja, gastos, proveedores, transferencias y devoluciones.
+Sistema móvil para equipos y accesorios: inventario por almacén, ventas, caja, gastos, proveedores, transferencias y devoluciones.
 
 ## Base de datos
 
-THOR usa **Supabase (PostgreSQL + Auth + Storage)**. La estructura completa está en [supabase/migrations/202608040001_initial_thor.sql](supabase/migrations/202608040001_initial_thor.sql).
+THOR usa Supabase (PostgreSQL, Auth y Storage) y se publica como aplicación estática en GitHub Pages.
 
-La migración crea:
+1. La estructura de la base está en `supabase/migrations/202608040001_initial_thor.sql`.
+2. Para el acceso desde GitHub Pages, ejecuta después `supabase/migrations/202608040002_github_pages_access.sql` en Supabase > SQL Editor.
 
-- Almacén Central y futuras tiendas; cada ubicación puede vender y tiene caja.
-- Equipos serializados (celular, laptop, tablet) con código, IMEI/serie y foto obligatoria.
-- Accesorios por SKU/código de barras y cantidad.
-- Compras por lote, proveedores, pagos y reclamos.
-- Ventas con varios productos, medios de pago mixtos, firma y PDF interno.
-- Transferencias con solicitud, aprobación, recepción e incidencias.
-- Caja, gastos diarios, devoluciones, movimientos y auditoría.
+Las migraciones crean almacenes, usuarios, equipos con IMEI y foto, accesorios, precios, proveedores, lotes, caja, gastos, ventas, transferencias, devoluciones y auditoría.
 
-Las tablas tienen Row Level Security activado. La `service_role` se usa únicamente en el servidor; jamás se debe copiar a GitHub, al navegador ni a un chat.
+## GitHub Pages
 
-## Configuración local
+1. En GitHub abre **Settings > Pages > Build and deployment** y selecciona **GitHub Actions**.
+2. Abre **Settings > Secrets and variables > Actions > Variables** y crea:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+3. Cada cambio enviado a `main` actualiza automáticamente:
+   `https://ingcesarohiggins-beep.github.io/thor/`
 
-1. Copia `.env.example` a `.env.local`.
-2. En Supabase, abre **Settings > API** y completa la URL, la clave pública y la clave secreta de servidor.
-3. Ejecuta la migración en **SQL Editor**.
-4. Instala dependencias y levanta la aplicación.
+La clave Publishable/Anon es la que usa la aplicación. No se necesita ni se debe subir la clave `service_role` a GitHub.
+
+## Desarrollo local
 
 ```powershell
 npm.cmd install
 npm.cmd run dev
 ```
 
-Para el primer acceso, se crea una cuenta con Email en Supabase Auth y se ejecuta la función `bootstrap_thor_admin(nombre, usuario)`. Esto inicializa el superadministrador y el **Almacén Central** una sola vez.
-
-## Verificación
-
-```powershell
-npm.cmd run build
-npm.cmd run lint
-```
-
-## Seguridad
-
-- El repositorio es público: solo debe contener código, `.env.example` y migraciones.
-- `.env.local` queda ignorado por Git.
-- Las fotos, comprobantes, firmas y PDFs van al bucket privado `thor-files`.
+Para el primer acceso se crea una cuenta de correo en Supabase Auth. Esa cuenta inicializa el superadministrador y el **Almacén Central**.
