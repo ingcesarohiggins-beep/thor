@@ -39,3 +39,8 @@
 - Aplicación web instalable y móvil primero, preparada para Android e iPhone.
 - Sin conexión se consulta/prepara; ventas y transferencias se confirman al recuperar Internet.
 - Base de datos D1, fotos/PDF en R2, respaldo diario y repositorio privado.
+
+## Documentación y manuales
+
+- Cada módulo nuevo debe incluir manuales de funcionamiento específicos para cada tipo de usuario con acceso a él (superadministrador, administrador y vendedor, según corresponda).
+- Debe mantenerse un manual general del sistema, actualizado con cada cambio funcional, de interfaz o de permisos que se implemente.

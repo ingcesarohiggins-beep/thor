@@ -41,3 +41,5 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/presentacion_thor_tmp/
+*.pptx.inspect.ndjson

@@ -3,11 +3,18 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Login, SetupNeeded } from "./login";
 import { getSupabaseBrowser } from "./lib/supabase-browser";
+import { calculateCartTotal, paymentTotal, paymentsMatchTotal } from "./lib/sale";
 
-type Section = "inicio" | "inventario" | "ventas" | "caja";
-type StockItem = { id: string; productId: string; name: string; detail: string; price: number; qty: number; kind: "Equipo" | "Accesorio" };
+type Section = "inicio" | "inventario" | "ventas" | "caja" | "manuales";
+type StockItem = { id: string; inventoryItemId?: string; productId: string; name: string; detail: string; price: number; qty: number; availableQty: number; kind: "Equipo" | "Accesorio" };
 type Metrics = { sales: number; expenses: number; value: number; count: number };
+type UserRole = "superadmin" | "admin" | "seller";
+type Payment = { method: string; amount: number | "" };
+type Customer = { name: string; dni: string; phone: string; address: string };
+
 const money = new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" });
+const emptyCustomer: Customer = { name: "", dni: "", phone: "", address: "" };
+const newPayment = (): Payment => ({ method: "Efectivo", amount: "" });
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
@@ -17,6 +24,9 @@ export default function Home() {
   const [metrics, setMetrics] = useState<Metrics>({ sales: 0, expenses: 0, value: 0, count: 0 });
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<StockItem[]>([]);
+  const [customer, setCustomer] = useState<Customer>(emptyCustomer);
+  const [payments, setPayments] = useState<Payment[]>([newPayment()]);
+  const [savingSale, setSavingSale] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [actor, setActor] = useState<{ id: string; name: string; role: string; locationId: string } | null>(null);
   const supabase = getSupabaseBrowser();
@@ -50,17 +60,45 @@ export default function Home() {
       supabase.from("expenses").select("amount").eq("location_id", current.locationId).gte("expense_date", new Date().toISOString().slice(0, 10)),
     ]);
     for (const result of [serials, accessories, prices, sales, expenses]) if (result.error) throw result.error;
-    const priceMap = new Map((prices.data ?? []).map((p) => [p.product_id, Number(p.price)]));
+    const priceMap = new Map((prices.data ?? []).map((price) => [price.product_id, Number(price.price)]));
     const rows: StockItem[] = [
-      ...(serials.data ?? []).map((item) => ({ id: item.code, productId: item.product_id, name: (item.products as unknown as { name: string }).name, detail: item.imei_1 ? `IMEI terminado en ${item.imei_1.slice(-4)}` : item.serial ? `Serie ${item.serial}` : "Equipo", price: priceMap.get(item.product_id) ?? 0, qty: 1, kind: "Equipo" as const })),
-      ...(accessories.data ?? []).map((item) => ({ id: (item.products as unknown as { sku: string }).sku, productId: item.product_id, name: (item.products as unknown as { name: string }).name, detail: `SKU ${(item.products as unknown as { sku: string }).sku}`, price: priceMap.get(item.product_id) ?? 0, qty: item.quantity, kind: "Accesorio" as const })),
+      ...(serials.data ?? []).map((item) => ({ id: item.code, inventoryItemId: item.id, productId: item.product_id, name: (item.products as unknown as { name: string }).name, detail: item.imei_1 ? `IMEI terminado en ${item.imei_1.slice(-4)}` : item.serial ? `Serie ${item.serial}` : "Equipo", price: priceMap.get(item.product_id) ?? 0, qty: 1, availableQty: 1, kind: "Equipo" as const })),
+      ...(accessories.data ?? []).map((item) => ({ id: (item.products as unknown as { sku: string }).sku, productId: item.product_id, name: (item.products as unknown as { name: string }).name, detail: `SKU ${(item.products as unknown as { sku: string }).sku}`, price: priceMap.get(item.product_id) ?? 0, qty: Number(item.quantity), availableQty: Number(item.quantity), kind: "Accesorio" as const })),
     ];
     setStock(rows);
-    setMetrics({ sales: (sales.data ?? []).reduce((sum, item) => sum + Number(item.total), 0), expenses: (expenses.data ?? []).reduce((sum, item) => sum + Number(item.amount), 0), value: (accessories.data ?? []).reduce((sum, item) => sum + Number(item.quantity) * Number(item.average_cost), 0), count: rows.reduce((sum, item) => sum + item.qty, 0) });
+    setMetrics({
+      sales: (sales.data ?? []).reduce((sum, item) => sum + Number(item.total), 0),
+      expenses: (expenses.data ?? []).reduce((sum, item) => sum + Number(item.amount), 0),
+      value: (accessories.data ?? []).reduce((sum, item) => sum + Number(item.quantity) * Number(item.average_cost), 0),
+      count: rows.reduce((sum, item) => sum + item.availableQty, 0),
+    });
     setNotice("THOR conectado a Supabase. Almacén Central listo.");
   };
 
-  useEffect(() => { void refresh().catch((error) => setNotice(error instanceof Error ? error.message : "Ejecuta la migración de acceso para GitHub Pages.")); }, [token]);
+  // The delayed refresh reads the current Supabase session after authentication settles.
+  useEffect(() => {
+    const refreshTimer = window.setTimeout(() => { void refresh().catch((error) => setNotice(error instanceof Error ? error.message : "Ejecuta las migraciones de Supabase antes de usar THOR.")); }, 0);
+    return () => window.clearTimeout(refreshTimer);
+  // refresh intentionally runs after the session token changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const addToCart = (item: StockItem) => {
+    setCart((current) => {
+      if (item.kind === "Equipo") return current.some((cartItem) => cartItem.id === item.id) ? current : [...current, { ...item, qty: 1 }];
+      const existing = current.find((cartItem) => cartItem.kind === "Accesorio" && cartItem.productId === item.productId);
+      if (existing) return existing.qty >= item.availableQty ? current : current.map((cartItem) => cartItem === existing ? { ...cartItem, qty: cartItem.qty + 1 } : cartItem);
+      return [...current, { ...item, qty: 1 }];
+    });
+  };
+
+  const updateAccessoryQuantity = (productId: string, quantity: number) => {
+    setCart((current) => current.flatMap((item) => {
+      if (item.productId !== productId || item.kind !== "Accesorio") return [item];
+      if (quantity < 1) return [];
+      return [{ ...item, qty: Math.min(quantity, item.availableQty) }];
+    }));
+  };
 
   const register = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -94,11 +132,85 @@ export default function Home() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo registrar el equipo."); }
   };
 
+  const completeSale = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !actor || !cart.length) return;
+    const total = calculateCartTotal(cart);
+    if (!paymentsMatchTotal(payments, total)) return setNotice("Los pagos deben coincidir exactamente con el total de la venta.");
+    setSavingSale(true);
+    try {
+      const { data, error } = await supabase.rpc("complete_sale", {
+        p_location_id: actor.locationId,
+        p_seller_id: actor.id,
+        p_customer_name: customer.name,
+        p_customer_dni: customer.dni,
+        p_customer_phone: customer.phone,
+        p_customer_address: customer.address,
+        p_lines: cart.map((item) => ({ product_id: item.productId, inventory_item_id: item.inventoryItemId ?? null, quantity: item.qty })),
+        p_payments: payments.map((payment) => ({ method: payment.method, amount: Number(payment.amount) })),
+      });
+      if (error) throw error;
+      const result = data as { code?: string; total?: number } | null;
+      setCart([]);
+      setCustomer(emptyCustomer);
+      setPayments([newPayment()]);
+      await refresh();
+      setNotice(`Venta ${result?.code ?? ""} confirmada por ${money.format(Number(result?.total ?? total))}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se pudo confirmar la venta.");
+    } finally { setSavingSale(false); }
+  };
+
+  const signOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setToken(null);
+    setActor(null);
+    setCart([]);
+    setSection("inicio");
+  };
+
   const items = useMemo(() => stock.filter((item) => `${item.id} ${item.name} ${item.detail}`.toLowerCase().includes(query.toLowerCase())), [stock, query]);
-  const total = cart.reduce((sum, item) => sum + item.price, 0);
+  const total = calculateCartTotal(cart);
+  const paid = paymentTotal(payments);
   if (!supabase) return <SetupNeeded />;
   if (!token) return <Login onAuthenticated={(accessToken) => { setToken(accessToken); setNotice("Sesión iniciada. Conectando THOR…"); }} />;
-  return <main className="thor-app"><aside className="side-nav"><div className="brand"><span className="bolt">ϟ</span><span>THOR</span></div><p className="location-label">SEDE ACTIVA</p><button className="location">Almacén Central</button><nav>{(["inicio", "inventario", "ventas", "caja"] as Section[]).map((name) => <button key={name} className={`nav-item ${section === name ? "active" : ""}`} onClick={() => setSection(name)}>{name === "inicio" ? "⌂" : name === "inventario" ? "▦" : name === "ventas" ? "▱" : "◫"} {name[0].toUpperCase() + name.slice(1)}</button>)}</nav><div className="profile"><span className="avatar">{actor?.name.slice(0, 2).toUpperCase() ?? "TH"}</span><div><strong>{actor?.name ?? "THOR"}</strong><small>{actor?.role ?? "Cargando"}</small></div></div></aside><section className="workspace"><header className="topbar"><div><p className="eyebrow">THOR · PERÚ</p><h1>{section === "inicio" ? "Todo bajo control" : section[0].toUpperCase() + section.slice(1)}</h1></div><button className="quick" onClick={() => setSection("ventas")}>＋ Nueva venta</button></header><div className="notice" role="status"><span>✓</span>{notice}</div>{section === "inicio" && <div className="content"><div className="metrics"><Metric label="Ventas del día" value={money.format(metrics.sales)} note="Ventas confirmadas"/><Metric label="Gastos del día" value={money.format(metrics.expenses)} note="Egresos registrados"/><Metric label="Inventario valorizado" value={money.format(metrics.value)} note={`${metrics.count} unidades disponibles`}/></div><section className="card"><h2>Base real conectada</h2><p>Inventario, usuarios y fotos se guardan directamente en Supabase. Este enlace se actualiza desde GitHub Pages.</p></section></div>}{section === "inventario" && <div className="content"><div className="page-actions"><label className="search">⌕<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre, IMEI o código"/></label><button className="primary" onClick={() => setRegisterOpen(true)}>＋ Registrar equipo</button></div><section className="card table-card">{items.length ? items.map((item) => <article className="inventory-row" key={item.id}><div className="product-image">{item.kind === "Equipo" ? "▣" : "⌁"}</div><div className="product"><strong>{item.name}</strong><small>{item.id} · {item.detail}</small></div><span className="badge success">Disponible</span><div className="price"><strong>{money.format(item.price)}</strong><small>{item.qty} unidades</small></div><button className="row-action" onClick={() => setCart((current) => [...current, item])}>Vender</button></article>) : <p className="empty">Aún no hay inventario. Registra el primer equipo.</p>}</section></div>}{section === "ventas" && <div className="sale-layout"><section className="catalog"><label className="search">⌕<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto"/></label><div className="sale-products">{items.map((item) => <button className="sale-product" key={item.id} onClick={() => setCart((current) => [...current, item])}><strong>{item.name}</strong><small>{money.format(item.price)} · {item.qty} disp.</small></button>)}</div></section><aside className="cart"><p className="eyebrow">VENTA NUEVA</p><h2>Borrador</h2>{cart.map((item, index) => <div className="cart-lines" key={`${item.id}-${index}`}><span>{item.name}</span><b>{money.format(item.price)}</b><button onClick={() => setCart((items) => items.filter((_, i) => i !== index))}>×</button></div>)}<div className="total"><span>Total</span><strong>{money.format(total)}</strong></div><button className="primary sale-button" disabled={!cart.length} onClick={() => { setCart([]); setNotice("Venta preparada. La confirmación con pago y firma se habilita en el siguiente módulo."); }}>Preparar venta</button></aside></div>}{section === "caja" && <div className="content"><section className="card"><p className="eyebrow">CAJA DE ALMACÉN CENTRAL</p><h2>Resumen diario</h2><div className="metrics"><Metric label="Ventas" value={money.format(metrics.sales)} note="Hoy"/><Metric label="Gastos" value={money.format(metrics.expenses)} note="Hoy"/></div></section></div>}</section>{registerOpen && <div className="modal-backdrop"><form className="modal" onSubmit={register}><button type="button" className="close" onClick={() => setRegisterOpen(false)}>×</button><p className="eyebrow">ENTRADA DE INVENTARIO</p><h2>Registrar equipo</h2><label>Marca y modelo<input name="name" required autoFocus placeholder="Ej. Samsung Galaxy A56"/></label><label>Tipo<select name="category" defaultValue="phone"><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>SKU interno<input name="sku" required placeholder="Ej. SAM-A56-256"/></label><label>IMEI, serial o código<input name="identifier" required/></label><div className="two-fields"><label>Costo (S/)<input name="cost" type="number" min="0" step="0.01" required/></label><label>Precio (S/)<input name="price" type="number" min="0" step="0.01" required/></label></div><label>Foto del equipo<input name="photo" required type="file" accept="image/*" capture="environment"/></label><button className="primary" type="submit">Guardar equipo</button></form></div>}</main>;
+
+  return <main className="thor-app">
+    <aside className="side-nav"><div className="brand"><span className="bolt">ϟ</span><span>THOR</span></div><p className="location-label">SEDE ACTIVA</p><button className="location">Almacén Central</button><nav>{(["inicio", "inventario", "ventas", "caja", "manuales"] as Section[]).map((name) => <button key={name} className={`nav-item ${section === name ? "active" : ""}`} onClick={() => setSection(name)}>{name === "inicio" ? "⌂" : name === "inventario" ? "▦" : name === "ventas" ? "▱" : name === "caja" ? "◫" : "?"} {name === "manuales" ? "Manuales" : name[0].toUpperCase() + name.slice(1)}</button>)}</nav><div className="profile"><span className="avatar">{actor?.name.slice(0, 2).toUpperCase() ?? "TH"}</span><div><strong>{actor?.name ?? "THOR"}</strong><small>{actor?.role ?? "Cargando"}</small></div><button className="sign-out" onClick={() => void signOut()} aria-label="Cerrar sesión" title="Cerrar sesión">↪</button></div></aside>
+    <section className="workspace"><header className="topbar"><div><p className="eyebrow">THOR · PERÚ</p><h1>{section === "inicio" ? "Todo bajo control" : section[0].toUpperCase() + section.slice(1)}</h1></div><button className="quick" onClick={() => setSection("ventas")}>＋ Nueva venta</button></header><div className="notice" role="status"><span>✓</span>{notice}</div>
+      {section === "inicio" && <div className="content"><section className="hero dashboard-hero"><div><p className="eyebrow">OPERACIÓN EN TIEMPO REAL</p><h2>Tu sede, bajo control.</h2><p>Consulta el estado de inventario, ventas y caja desde un solo lugar.</p></div><button className="primary" onClick={() => setSection("ventas")}>Nueva venta</button></section><div className="metrics"><Metric label="Ventas del día" value={money.format(metrics.sales)} note="Ventas confirmadas"/><Metric label="Gastos del día" value={money.format(metrics.expenses)} note="Egresos registrados"/><Metric label="Inventario valorizado" value={money.format(metrics.value)} note={`${metrics.count} unidades disponibles`}/></div><QuickGuide role={actor?.role as UserRole | undefined} onOpenInventory={() => setSection("inventario")} onOpenSales={() => setSection("ventas")}/><section className="card"><h2>Base real conectada</h2><p>Inventario, usuarios y fotos se guardan directamente en Supabase. Las ventas confirmadas actualizan el stock como una sola operación.</p></section></div>}
+      {section === "inventario" && <div className="content"><div className="page-actions"><label className="search">⌕<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre, IMEI o código"/></label><button className="primary" onClick={() => setRegisterOpen(true)}>＋ Registrar equipo</button></div><section className="card table-card">{items.length ? items.map((item) => <article className="inventory-row" key={item.id}><div className="product-image">{item.kind === "Equipo" ? "▣" : "⌁"}</div><div className="product"><strong>{item.name}</strong><small>{item.id} · {item.detail}</small></div><span className="badge success">Disponible</span><div className="price"><strong>{money.format(item.price)}</strong><small>{item.availableQty} unidades</small></div><button className="row-action" onClick={() => { addToCart(item); setSection("ventas"); }}>Vender</button></article>) : <p className="empty">Aún no hay inventario. Registra el primer equipo.</p>}</section></div>}
+      {section === "ventas" && <div className="sale-layout"><section className="catalog"><label className="search">⌕<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto"/></label><div className="sale-products">{items.map((item) => <button className="sale-product" key={item.id} onClick={() => addToCart(item)}><strong>{item.name}</strong><small>{money.format(item.price)} · {item.availableQty} disp.</small></button>)}</div></section><aside className="cart"><form onSubmit={completeSale}><p className="eyebrow">VENTA NUEVA</p><h2>Confirmar venta</h2><div className="customer"><label>Cliente<input value={customer.name} onChange={(event) => setCustomer({ ...customer, name: event.target.value })} placeholder="Cliente General"/></label><label>DNI <input value={customer.dni} onChange={(event) => setCustomer({ ...customer, dni: event.target.value })} placeholder="Opcional"/></label></div><div className="cart-lines">{cart.length ? cart.map((item) => <div key={item.id}><span>{item.name}<small>{item.qty} × {money.format(item.price)}</small></span><b>{money.format(item.price * item.qty)}</b>{item.kind === "Accesorio" && <span className="quantity"><button type="button" onClick={() => updateAccessoryQuantity(item.productId, item.qty - 1)} aria-label={`Restar ${item.name}`}>−</button><button type="button" onClick={() => updateAccessoryQuantity(item.productId, item.qty + 1)} aria-label={`Agregar ${item.name}`}>＋</button></span>}<button type="button" onClick={() => setCart((current) => current.filter((cartItem) => cartItem.id !== item.id))} aria-label={`Quitar ${item.name}`}>×</button></div>) : <p className="empty">Agrega productos para comenzar.</p>}</div><div className="payment-head"><strong>Pagos</strong><button type="button" className="text-button" onClick={() => setPayments((current) => [...current, newPayment()])}>＋ Combinar pago</button></div><div className="payments">{payments.map((payment, index) => <div className="payment-row" key={index}><select value={payment.method} onChange={(event) => setPayments((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, method: event.target.value } : item))}><option>Efectivo</option><option>Yape/Plin</option><option>Transferencia</option><option>Tarjeta</option></select><input type="number" min="0" step="0.01" value={payment.amount} onChange={(event) => setPayments((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value === "" ? "" : Number(event.target.value) } : item))} placeholder="Monto"/>{payments.length > 1 && <button type="button" onClick={() => setPayments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>}</div>)}</div><button type="button" className="text-button fill-payment" onClick={() => setPayments((current) => current.map((payment, index) => index === 0 ? { ...payment, amount: Number((total - (paymentTotal(current.slice(1)) || 0)).toFixed(2)) } : payment))}>Usar total pendiente</button><div className="total"><span>Total <small>{money.format(paid)} pagado</small></span><strong>{money.format(total)}</strong></div><button className="primary sale-button" disabled={!cart.length || savingSale || !paymentsMatchTotal(payments, total)} type="submit">{savingSale ? "Confirmando…" : "Confirmar venta"}</button><small className="sale-note">La venta se guarda con sus pagos y actualiza el stock disponible.</small></form></aside></div>}
+      {section === "caja" && <div className="content"><section className="card"><p className="eyebrow">CAJA DE ALMACÉN CENTRAL</p><h2>Resumen diario</h2><div className="metrics"><Metric label="Ventas" value={money.format(metrics.sales)} note="Hoy"/><Metric label="Gastos" value={money.format(metrics.expenses)} note="Hoy"/></div></section></div>}
+      {section === "manuales" && <ManualCenter role={actor?.role as UserRole | undefined} onOpenSales={() => setSection("ventas")} />}
+    </section>
+    {registerOpen && <div className="modal-backdrop"><form className="modal" onSubmit={register}><button type="button" className="close" onClick={() => setRegisterOpen(false)}>×</button><p className="eyebrow">ENTRADA DE INVENTARIO</p><h2>Registrar equipo</h2><label>Marca y modelo<input name="name" required autoFocus placeholder="Ej. Samsung Galaxy A56"/></label><label>Tipo<select name="category" defaultValue="phone"><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>SKU interno<input name="sku" required placeholder="Ej. SAM-A56-256"/></label><label>IMEI, serial o código<input name="identifier" required/></label><div className="two-fields"><label>Costo (S/)<input name="cost" type="number" min="0" step="0.01" required/></label><label>Precio (S/)<input name="price" type="number" min="0" step="0.01" required/></label></div><label>Foto del equipo<input name="photo" required type="file" accept="image/*" capture="environment"/></label><button className="primary" type="submit">Guardar equipo</button></form></div>}
+  </main>;
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) { return <section className="metric"><p>{label}</p><strong>{value}</strong><small>{note}</small></section>; }
+
+function QuickGuide({ role, onOpenInventory, onOpenSales }: { role?: UserRole; onOpenInventory: () => void; onOpenSales: () => void }) {
+  const guide = role === "seller"
+    ? { title: "Guía rápida para vendedor", description: "Consulta existencias, arma la venta desde tu sede y confirma el pago completo.", action: "Ir a ventas", onAction: onOpenSales, steps: ["Busca el producto por nombre, IMEI o código.", "Añádelo a la venta y verifica el total.", "Registra el pago y confirma la venta."] }
+    : role === "admin"
+      ? { title: "Guía rápida para administrador", description: "Supervisa la operación diaria de tu sede: inventario, ventas y caja.", action: "Ver inventario", onAction: onOpenInventory, steps: ["Registra equipos con sus datos, costo, precio y foto.", "Revisa las ventas y movimientos de la sede.", "Controla el resumen diario de caja y gastos."] }
+      : { title: "Guía rápida para superadministrador", description: "Controla la operación general y mantén la información de THOR ordenada y actualizada.", action: "Ver inventario", onAction: onOpenInventory, steps: ["Configura usuarios y sus permisos por sede.", "Supervisa inventario, ventas y caja de cada operación.", "Revisa auditoría y actualiza los manuales cuando cambie el sistema."] };
+  return <section className="quick-guide" aria-labelledby="quick-guide-title"><div><p className="eyebrow">AYUDA SEGÚN TU USUARIO</p><h2 id="quick-guide-title">{guide.title}</h2><p>{guide.description}</p></div><ol>{guide.steps.map((step) => <li key={step}>{step}</li>)}</ol><button className="secondary" onClick={guide.onAction}>{guide.action}</button></section>;
+}
+
+function ManualCenter({ role, onOpenSales }: { role?: UserRole; onOpenSales: () => void }) {
+  const roleManual = role === "seller"
+    ? { name: "Vendedor", purpose: "Atender con rapidez y confirmar cada venta sin perder el control del stock.", steps: ["Busca el producto por nombre, IMEI o código.", "Agrega los artículos, revisa cantidades y registra el pago.", "Confirma la venta solo cuando el total esté pagado."], action: "Practicar una venta" }
+    : role === "admin"
+      ? { name: "Administrador", purpose: "Mantener la operación de la sede ordenada y verificable.", steps: ["Registra equipos con sus datos, costo, precio y evidencia.", "Revisa ventas, movimientos y diferencias de caja.", "Aprueba los cambios que requieran control administrativo."], action: "Ir a ventas" }
+      : { name: "Superadministrador", purpose: "Definir el control general y asegurar que cada cambio quede documentado.", steps: ["Configura usuarios, permisos y sedes antes de iniciar la operación.", "Supervisa inventario, ventas, caja y auditoría.", "Actualiza los manuales por rol cuando cambie un módulo o permiso."], action: "Ir a ventas" };
+  const modules = [
+    ["Inventario", "Registrar, consultar y vender equipos o accesorios disponibles.", "Activo"],
+    ["Ventas", "Preparar la venta, registrar pagos y confirmar el descuento de stock.", "Activo"],
+    ["Caja", "Consultar el resumen diario de ventas y gastos de la sede.", "En evolución"],
+    ["Documentación", "Manual por rol y manual general que se actualizan con cada cambio.", "Vigente"],
+  ];
+  return <div className="content manuals-page"><section className="manuals-hero"><div><p className="eyebrow">CENTRO DE AYUDA THOR</p><h2>Manuales claros para cada persona.</h2><p>Encuentra qué puedes hacer, cómo hacerlo y qué controles debes respetar en cada módulo.</p></div><div className="manual-version"><span>Manual general</span><strong>Versión 1.0</strong><small>Actualizado: 6 ago. 2026</small></div></section><section className="manual-role"><div className="manual-role-icon">{roleManual.name.slice(0, 1)}</div><div><p className="eyebrow">TU MANUAL · {roleManual.name.toUpperCase()}</p><h3>Cómo operar como {roleManual.name.toLowerCase()}</h3><p>{roleManual.purpose}</p></div><button className="primary" onClick={onOpenSales}>{roleManual.action}</button></section><section className="manual-steps">{roleManual.steps.map((step, index) => <article key={step}><span>{String(index + 1).padStart(2, "0")}</span><p>{step}</p></article>)}</section><section className="manuals-section"><div className="section-heading"><div><p className="eyebrow">MANUAL GENERAL DEL SISTEMA</p><h3>Módulos y última actualización</h3></div><span className="manual-live">● Vigente</span></div><div className="manual-modules">{modules.map(([name, description, state]) => <article key={name}><div><h4>{name}</h4><p>{description}</p></div><span className={state === "Activo" || state === "Vigente" ? "badge success" : "badge warning"}>{state}</span></article>)}</div></section><section className="manual-update"><div><p className="eyebrow">REGLA DE ACTUALIZACIÓN</p><h3>Cada módulo nuevo deja su manual listo antes de usarse.</h3><p>Cuando cambie una función, interfaz o permiso, se actualiza el manual del rol afectado y este manual general.</p></div><span>✓</span></section></div>;
+}

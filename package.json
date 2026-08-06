@@ -9,8 +9,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "next build",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test": "node --test tests/sale-workflow.test.mjs",
+    "check": "npm.cmd run lint && npm.cmd run test && npm.cmd run build",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern presentacion_thor_tmp",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
