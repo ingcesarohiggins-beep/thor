@@ -1018,20 +1018,27 @@ function UserCenter({
 }) {
   const supabase = getSupabaseBrowser();
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [locations, setLocations] = useState<{ id: string; name: string }[]>(
+    [],
+  );
   const [message, setMessage] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     if (!supabase) return;
-    const userResult = await supabase
-      .from("app_users")
-      .select("id, name, email, role, active, locations(name)")
-      .order("created_at", { ascending: true });
-    if (userResult.error) {
+    const [userResult, locationResult] = await Promise.all([
+      supabase
+        .from("app_users")
+        .select("id, name, email, role, active, locations(name)")
+        .order("created_at", { ascending: true }),
+      supabase.from("locations").select("id, name").eq("active", true),
+    ]);
+    if (userResult.error || locationResult.error) {
       setMessage("No se pudieron cargar los usuarios.");
       return;
     }
     setUsers((userResult.data ?? []) as ManagedUser[]);
+    setLocations(locationResult.data ?? []);
   }, [supabase]);
 
   useEffect(() => {
@@ -1041,15 +1048,34 @@ function UserCenter({
     return () => window.clearTimeout(loadTimer);
   }, [loadUsers]);
 
-  const copyLink = async () => {
-    await navigator.clipboard.writeText(window.location.origin);
-    setMessage(
-      "Enlace copiado. Compartelo con la nueva persona para que cree su cuenta.",
-    );
+  const createUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    const requestedRole = String(form.get("role") ?? "seller");
+    const role = actor.role === "superadmin" ? requestedRole : "seller";
+    setSavingId("new-user");
+    setMessage("");
+    const result = await supabase.functions.invoke("create-thor-user", {
+      body: {
+        name: String(form.get("name") ?? "").trim(),
+        email: String(form.get("email") ?? "")
+          .trim()
+          .toLowerCase(),
+        password: String(form.get("password") ?? ""),
+        role,
+        locationId: String(form.get("location_id") ?? actor.locationId),
+      },
+    });
+    setSavingId(null);
+    if (result.error) return setMessage(result.error.message);
+    event.currentTarget.reset();
+    setMessage("Usuario creado correctamente.");
+    await loadUsers();
   };
 
   const updateRole = async (userId: string, role: "admin" | "seller") => {
-    if (!supabase) return;
+    if (!supabase || actor.role !== "superadmin") return;
     setSavingId(userId);
     setMessage("");
     const result = await supabase
@@ -1081,19 +1107,79 @@ function UserCenter({
       </section>
       <div className="users-grid">
         <section className="card link-card">
-          <p className="eyebrow">REGISTRO SIMPLE</p>
-          <h3>Comparte un solo enlace</h3>
+          <p className="eyebrow">NUEVO USUARIO</p>
+          <h3>Crear acceso desde THOR</h3>
           <p>
-            No necesitas crear invitaciones. Comparte el enlace de THOR y cada
-            persona crea su propia cuenta.
+            {actor.role === "superadmin"
+              ? "Puedes crear vendedores y administradores."
+              : "Puedes crear cuentas de vendedor para tu sede."}
           </p>
-          <button
-            className="primary"
-            type="button"
-            onClick={() => void copyLink()}
-          >
-            Copiar enlace de registro
-          </button>
+          <form onSubmit={createUser} className="invite-form">
+            <label>
+              Nombre completo
+              <input name="name" required placeholder="Ej. Ana Torres" />
+            </label>
+            <label>
+              Correo
+              <input
+                name="email"
+                type="email"
+                required
+                placeholder="ana@empresa.com"
+              />
+            </label>
+            <label>
+              Contrasena
+              <input
+                name="password"
+                type="password"
+                minLength={8}
+                required
+                autoComplete="new-password"
+              />
+            </label>
+            <div className="two-fields">
+              <label>
+                Rol
+                {actor.role === "superadmin" ? (
+                  <select name="role" defaultValue="seller">
+                    <option value="seller">Vendedor</option>
+                    <option value="admin">Administrador</option>
+                  </select>
+                ) : (
+                  <input readOnly value="Vendedor" />
+                )}
+              </label>
+              <label>
+                Sede
+                {actor.role === "superadmin" ? (
+                  <select name="location_id" defaultValue={actor.locationId}>
+                    {locations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    readOnly
+                    value={
+                      locations.find(
+                        (location) => location.id === actor.locationId,
+                      )?.name ?? "Sede asignada"
+                    }
+                  />
+                )}
+              </label>
+            </div>
+            <button
+              className="primary"
+              type="submit"
+              disabled={savingId === "new-user"}
+            >
+              {savingId === "new-user" ? "Creando..." : "Crear usuario"}
+            </button>
+          </form>
           {message && (
             <p className="users-message" role="status">
               {message}
@@ -1102,15 +1188,15 @@ function UserCenter({
         </section>
         <section className="card user-howto">
           <p className="eyebrow">COMO DAR ACCESO</p>
-          <h3>Registro en dos pasos</h3>
+          <h3>Acceso controlado</h3>
           <ol>
-            <li>Comparte el enlace de THOR con la nueva persona.</li>
-            <li>Ella pulsa &quot;Crear cuenta&quot; y registra sus datos.</li>
-            <li>Luego aparece en esta lista como Vendedor.</li>
+            <li>El administrador registra correo y contrasena.</li>
+            <li>THOR crea la cuenta con el rol seleccionado.</li>
+            <li>La persona ingresa con las credenciales que le entregues.</li>
           </ol>
           <p>
-            Si necesita administrar el sistema, cambia su rol a Administrador
-            desde esta misma pantalla.
+            El Superadmin es el unico que puede crear o asignar el rol de
+            Administrador.
           </p>
         </section>
       </div>
@@ -1136,9 +1222,7 @@ function UserCenter({
                     {user.locations?.[0]?.name ?? "Sin sede"}
                   </small>
                 </div>
-                {user.role === "superadmin" ? (
-                  <span className="badge neutral">Superadmin</span>
-                ) : (
+                {actor.role === "superadmin" && user.role !== "superadmin" ? (
                   <select
                     className="user-role-select"
                     value={user.role}
@@ -1154,6 +1238,12 @@ function UserCenter({
                     <option value="seller">Vendedor</option>
                     <option value="admin">Administrador</option>
                   </select>
+                ) : user.role === "superadmin" ? (
+                  <span className="badge neutral">Superadmin</span>
+                ) : (
+                  <span className="badge neutral">
+                    {user.role === "admin" ? "Administrador" : "Vendedor"}
+                  </span>
                 )}
                 <span
                   className={user.active ? "badge success" : "badge warning"}

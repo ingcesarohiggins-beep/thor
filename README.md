@@ -60,4 +60,4 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Comparte el enlace de THOR para que cada persona cree su propia cuenta. Las cuentas nuevas inician como **Vendedor** y un administrador puede ajustar su rol desde el módulo **Usuarios**.
+Las cuentas se crean dentro del módulo **Usuarios**. El Superadmin puede crear vendedores y administradores; el Administrador solo puede crear vendedores.

@@ -15,7 +15,12 @@ No publiques `SUPABASE_SERVICE_ROLE_KEY`: esa clave permite administrar toda la 
 
 ## Crear los demas usuarios
 
-1. Ejecuta `migrations/202608060005_simple_user_signup.sql` en Supabase SQL Editor.
-2. Comparte el enlace de THOR con cada persona.
-3. Cada persona pulsa **Crear cuenta**, registra su nombre, correo y contrasena.
-4. La cuenta queda como **Vendedor**. Un administrador puede cambiarla a **Administrador** en el modulo **Usuarios**.
+1. Ejecuta `migrations/202608060006_admin_user_management.sql` en Supabase SQL Editor.
+2. En Supabase CLI despliega la funcion: `supabase functions deploy create-thor-user`.
+3. En THOR, el Superadmin crea vendedores o administradores desde **Usuarios**. Un Administrador solo crea vendedores.
+
+La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las variables publicas de THOR.
+
+## Recuperacion de contrasena
+
+En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.
