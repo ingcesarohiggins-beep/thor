@@ -44,14 +44,6 @@ type ManagedUser = {
   active: boolean;
   locations: { name: string }[];
 };
-type PendingInvite = {
-  id: string;
-  name: string;
-  email: string;
-  role: "admin" | "seller";
-  accepted_at: string | null;
-};
-type Location = { id: string; name: string };
 
 const money = new Intl.NumberFormat("es-PE", {
   style: "currency",
@@ -326,15 +318,13 @@ export default function Home() {
         .eq("product_id", product.data.id)
         .eq("location_id", actor.locationId)
         .eq("active", true);
-      const priceSave = await supabase
-        .from("product_prices")
-        .insert({
-          product_id: product.data.id,
-          location_id: actor.locationId,
-          price,
-          changed_by: actor.id,
-          active: true,
-        });
+      const priceSave = await supabase.from("product_prices").insert({
+        product_id: product.data.id,
+        location_id: actor.locationId,
+        price,
+        changed_by: actor.id,
+        active: true,
+      });
       if (priceSave.error) throw priceSave.error;
       setRegisterOpen(false);
       await refresh();
@@ -437,33 +427,40 @@ export default function Home() {
         <button className="location">Almacén Central</button>
         <nav>
           {(
-            ["inicio", "inventario", "ventas", "caja", "usuarios", "manuales"] as Section[]
+            [
+              "inicio",
+              "inventario",
+              "ventas",
+              "caja",
+              "usuarios",
+              "manuales",
+            ] as Section[]
           )
             .filter((name) => name !== "usuarios" || actor?.role !== "seller")
             .map((name) => (
-            <button
-              key={name}
-              className={`nav-item ${section === name ? "active" : ""}`}
-              onClick={() => setSection(name)}
-            >
-              {name === "inicio"
-                ? "⌂"
-                : name === "inventario"
-                  ? "▦"
-                  : name === "ventas"
-                    ? "▱"
-                    : name === "caja"
-                      ? "◫"
-                      : name === "usuarios"
-                        ? "♙"
-                        : "?"}{" "}
-              {name === "manuales"
-                ? "Manuales"
-                : name === "usuarios"
-                  ? "Usuarios"
-                  : name[0].toUpperCase() + name.slice(1)}
-            </button>
-          ))}
+              <button
+                key={name}
+                className={`nav-item ${section === name ? "active" : ""}`}
+                onClick={() => setSection(name)}
+              >
+                {name === "inicio"
+                  ? "⌂"
+                  : name === "inventario"
+                    ? "▦"
+                    : name === "ventas"
+                      ? "▱"
+                      : name === "caja"
+                        ? "◫"
+                        : name === "usuarios"
+                          ? "♙"
+                          : "?"}{" "}
+                {name === "manuales"
+                  ? "Manuales"
+                  : name === "usuarios"
+                    ? "Usuarios"
+                    : name[0].toUpperCase() + name.slice(1)}
+              </button>
+            ))}
         </nav>
         <div className="profile">
           <span className="avatar">
@@ -1021,33 +1018,20 @@ function UserCenter({
 }) {
   const supabase = getSupabaseBrowser();
   const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [invites, setInvites] = useState<PendingInvite[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [message, setMessage] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     if (!supabase) return;
-    const [userResult, inviteResult, locationResult] = await Promise.all([
-      supabase
-        .from("app_users")
-        .select("id, name, email, role, active, locations(name)")
-        .order("created_at", { ascending: true }),
-      supabase
-        .from("user_invites")
-        .select("id, name, email, role, accepted_at")
-        .order("created_at", { ascending: false }),
-      supabase.from("locations").select("id, name").eq("active", true),
-    ]);
-    if (userResult.error || inviteResult.error || locationResult.error) {
-      setMessage(
-        "Ejecuta la migracion de invitaciones en Supabase antes de administrar usuarios.",
-      );
+    const userResult = await supabase
+      .from("app_users")
+      .select("id, name, email, role, active, locations(name)")
+      .order("created_at", { ascending: true });
+    if (userResult.error) {
+      setMessage("No se pudieron cargar los usuarios.");
       return;
     }
     setUsers((userResult.data ?? []) as ManagedUser[]);
-    setInvites((inviteResult.data ?? []) as PendingInvite[]);
-    setLocations((locationResult.data ?? []) as Location[]);
   }, [supabase]);
 
   useEffect(() => {
@@ -1057,23 +1041,24 @@ function UserCenter({
     return () => window.clearTimeout(loadTimer);
   }, [loadUsers]);
 
-  const createInvite = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(window.location.origin);
+    setMessage(
+      "Enlace copiado. Compartelo con la nueva persona para que cree su cuenta.",
+    );
+  };
+
+  const updateRole = async (userId: string, role: "admin" | "seller") => {
     if (!supabase) return;
-    const form = new FormData(event.currentTarget);
-    setSaving(true);
+    setSavingId(userId);
     setMessage("");
-    const result = await supabase.from("user_invites").insert({
-      name: String(form.get("name") ?? "").trim(),
-      email: String(form.get("email") ?? "").trim().toLowerCase(),
-      role: String(form.get("role") ?? "seller"),
-      location_id: String(form.get("location_id") ?? actor.locationId),
-      created_by: actor.id,
-    });
-    setSaving(false);
+    const result = await supabase
+      .from("app_users")
+      .update({ role })
+      .eq("id", userId);
+    setSavingId(null);
     if (result.error) return setMessage(result.error.message);
-    event.currentTarget.reset();
-    setMessage("Invitacion creada. Indica a la persona que active su acceso con ese correo.");
+    setMessage("Rol actualizado correctamente.");
     await loadUsers();
   };
 
@@ -1084,7 +1069,10 @@ function UserCenter({
         <div>
           <p className="eyebrow">CONTROL DE ACCESO</p>
           <h2>Usuarios y permisos</h2>
-          <p>Da acceso por correo, define el rol y deja cada cuenta ligada a su sede.</p>
+          <p>
+            Da acceso por correo, define el rol y deja cada cuenta ligada a su
+            sede.
+          </p>
         </div>
         <div className="users-count">
           <strong>{users.filter((user) => user.active).length}</strong>
@@ -1092,33 +1080,93 @@ function UserCenter({
         </div>
       </section>
       <div className="users-grid">
-        <section className="card invite-card">
-          <p className="eyebrow">NUEVO USUARIO</p>
-          <h3>Crear invitacion</h3>
-          <p>La persona usara este mismo correo para crear su contrasena en la pantalla de acceso.</p>
-          <form onSubmit={createInvite} className="invite-form">
-            <label>Nombre completo<input name="name" required placeholder="Ej. Ana Torres" /></label>
-            <label>Correo<input name="email" type="email" required placeholder="ana@empresa.com" /></label>
-            <div className="two-fields">
-              <label>Rol<select name="role" defaultValue="seller"><option value="seller">Vendedor</option><option value="admin">Administrador</option></select></label>
-              <label>Sede<select name="location_id" defaultValue={actor.locationId}>{locations.map((location) => <option value={location.id} key={location.id}>{location.name}</option>)}</select></label>
-            </div>
-            <button className="primary" disabled={saving} type="submit">{saving ? "Creando..." : "Crear invitacion"}</button>
-          </form>
-          {message && <p className="users-message" role="status">{message}</p>}
+        <section className="card link-card">
+          <p className="eyebrow">REGISTRO SIMPLE</p>
+          <h3>Comparte un solo enlace</h3>
+          <p>
+            No necesitas crear invitaciones. Comparte el enlace de THOR y cada
+            persona crea su propia cuenta.
+          </p>
+          <button
+            className="primary"
+            type="button"
+            onClick={() => void copyLink()}
+          >
+            Copiar enlace de registro
+          </button>
+          {message && (
+            <p className="users-message" role="status">
+              {message}
+            </p>
+          )}
         </section>
         <section className="card user-howto">
           <p className="eyebrow">COMO DAR ACCESO</p>
-          <h3>Proceso seguro en dos pasos</h3>
-          <ol><li>Crea la invitacion con el correo y el rol correcto.</li><li>Comparte con la persona el enlace de THOR.</li><li>Ella elige &quot;Activa tu acceso&quot; y crea su contrasena.</li></ol>
-          <p>El rol no se elige al registrarse: queda definido por ti antes de crear la cuenta.</p>
+          <h3>Registro en dos pasos</h3>
+          <ol>
+            <li>Comparte el enlace de THOR con la nueva persona.</li>
+            <li>Ella pulsa &quot;Crear cuenta&quot; y registra sus datos.</li>
+            <li>Luego aparece en esta lista como Vendedor.</li>
+          </ol>
+          <p>
+            Si necesita administrar el sistema, cambia su rol a Administrador
+            desde esta misma pantalla.
+          </p>
         </section>
       </div>
       <section className="card users-list-card">
-        <div className="card-head"><div><p className="eyebrow">CUENTAS ACTIVAS</p><h3>Usuarios de THOR</h3></div><span className="badge success">{users.length} registrados</span></div>
-      {users.length ? <div className="users-list">{users.map((user) => <article key={user.id}><span className="user-avatar">{user.name.slice(0, 2).toUpperCase()}</span><div><strong>{user.name}</strong><small>{user.email ?? "Sin correo registrado"} · {user.locations?.[0]?.name ?? "Sin sede"}</small></div><span className="badge neutral">{user.role === "superadmin" ? "Superadmin" : user.role === "admin" ? "Administrador" : "Vendedor"}</span><span className={user.active ? "badge success" : "badge warning"}>{user.active ? "Activo" : "Inactivo"}</span></article>)}</div> : <p className="empty">Aun no hay usuarios cargados.</p>}
+        <div className="card-head">
+          <div>
+            <p className="eyebrow">CUENTAS ACTIVAS</p>
+            <h3>Usuarios de THOR</h3>
+          </div>
+          <span className="badge success">{users.length} registrados</span>
+        </div>
+        {users.length ? (
+          <div className="users-list">
+            {users.map((user) => (
+              <article key={user.id}>
+                <span className="user-avatar">
+                  {user.name.slice(0, 2).toUpperCase()}
+                </span>
+                <div>
+                  <strong>{user.name}</strong>
+                  <small>
+                    {user.email ?? "Sin correo registrado"} ·{" "}
+                    {user.locations?.[0]?.name ?? "Sin sede"}
+                  </small>
+                </div>
+                {user.role === "superadmin" ? (
+                  <span className="badge neutral">Superadmin</span>
+                ) : (
+                  <select
+                    className="user-role-select"
+                    value={user.role}
+                    disabled={savingId === user.id}
+                    onChange={(event) =>
+                      void updateRole(
+                        user.id,
+                        event.target.value as "admin" | "seller",
+                      )
+                    }
+                    aria-label={`Rol de ${user.name}`}
+                  >
+                    <option value="seller">Vendedor</option>
+                    <option value="admin">Administrador</option>
+                  </select>
+                )}
+                <span
+                  className={user.active ? "badge success" : "badge warning"}
+                >
+                  {user.active ? "Activo" : "Inactivo"}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">Aun no hay usuarios cargados.</p>
+        )}
       </section>
-      {invites.filter((invite) => !invite.accepted_at).length > 0 && <section className="card pending-invites"><p className="eyebrow">INVITACIONES PENDIENTES</p>{invites.filter((invite) => !invite.accepted_at).map((invite) => <article key={invite.id}><div><strong>{invite.name}</strong><small>{invite.email}</small></div><span className="badge warning">Pendiente: {invite.role === "admin" ? "Administrador" : "Vendedor"}</span></article>)}</section>}
     </div>
   );
 }

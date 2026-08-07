@@ -1,5 +1,217 @@
 @import "tailwindcss";
-.users-page{max-width:1260px}.users-hero{display:flex;justify-content:space-between;align-items:center;gap:22px;border-radius:16px;padding:30px 33px;background:linear-gradient(120deg,#18303a,#2f4950);color:#fff;box-shadow:0 14px 30px #1325301f}.users-hero .eyebrow{color:#e5c978}.users-hero h2{margin:0 0 8px;font-size:29px}.users-hero p:not(.eyebrow){margin:0;color:#cfdbdc;font-size:14px}.users-count{min-width:130px;border:1px solid #ffffff2c;background:#ffffff12;border-radius:12px;padding:15px;text-align:center;display:grid;gap:4px}.users-count strong{font-size:27px;color:#f0d27e}.users-count span{font-size:11px;color:#d5e0e1}.users-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:17px;margin:20px 0}.invite-card h3,.user-howto h3{margin:0 0 8px;font-size:19px}.invite-card>p:not(.eyebrow),.user-howto>p:not(.eyebrow){color:var(--muted);font-size:12px;line-height:1.5}.invite-form{display:grid;gap:12px;margin-top:18px}.invite-form label{display:grid;gap:6px;color:#56625f;font-size:12px;font-weight:bold}.invite-form input,.invite-form select{width:100%;border:1px solid #d7ddd9;border-radius:8px;background:#fff;padding:10px;color:var(--ink)}.invite-form .two-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.invite-form .primary{justify-self:start}.users-message{margin:14px 0 0;color:#287d5b;font-size:12px;line-height:1.45}.user-howto{background:#fffaf0}.user-howto ol{padding-left:20px;margin:18px 0;display:grid;gap:10px;color:#535d59;font-size:13px;line-height:1.45}.users-list-card{padding:0;overflow:hidden}.users-list-card .card-head{padding:21px}.users-list{border-top:1px solid var(--line)}.users-list article,.pending-invites article{display:grid;grid-template-columns:40px 1fr auto auto;align-items:center;gap:12px;padding:15px 21px;border-bottom:1px solid var(--line)}.users-list article:last-child{border-bottom:0}.user-avatar{width:38px;height:38px;border-radius:10px;background:#f5ebd1;color:#9d782d;display:grid;place-items:center;font-size:11px;font-weight:bold}.users-list article>div,.pending-invites article>div{display:grid;gap:4px}.users-list strong,.pending-invites strong{font-size:13px}.users-list small,.pending-invites small{font-size:11px;color:var(--muted)}.pending-invites{margin-top:20px;padding:0}.pending-invites>.eyebrow{padding:20px 21px 0}.pending-invites article{grid-template-columns:1fr auto}.pending-invites article:last-child{border-bottom:0}@media(max-width:780px){.users-hero{display:block;padding:25px}.users-count{width:max-content;margin-top:18px}.users-grid{grid-template-columns:1fr}.users-list article{grid-template-columns:38px 1fr auto}.users-list article .badge:last-child{display:none}}@media(max-width:500px){.invite-form .two-fields{grid-template-columns:1fr}.users-list article{padding:14px}.users-list small{max-width:175px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.user-role-select {
+  border: 1px solid #d7ddd9;
+  border-radius: 8px;
+  background: #fff;
+  color: #55615e;
+  padding: 7px 9px;
+  font-size: 11px;
+  font-weight: bold;
+}
+.user-role-select:disabled {
+  opacity: 0.6;
+}
+.users-page {
+  max-width: 1260px;
+}
+.users-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 22px;
+  border-radius: 16px;
+  padding: 30px 33px;
+  background: linear-gradient(120deg, #18303a, #2f4950);
+  color: #fff;
+  box-shadow: 0 14px 30px #1325301f;
+}
+.users-hero .eyebrow {
+  color: #e5c978;
+}
+.users-hero h2 {
+  margin: 0 0 8px;
+  font-size: 29px;
+}
+.users-hero p:not(.eyebrow) {
+  margin: 0;
+  color: #cfdbdc;
+  font-size: 14px;
+}
+.users-count {
+  min-width: 130px;
+  border: 1px solid #ffffff2c;
+  background: #ffffff12;
+  border-radius: 12px;
+  padding: 15px;
+  text-align: center;
+  display: grid;
+  gap: 4px;
+}
+.users-count strong {
+  font-size: 27px;
+  color: #f0d27e;
+}
+.users-count span {
+  font-size: 11px;
+  color: #d5e0e1;
+}
+.users-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 17px;
+  margin: 20px 0;
+}
+.link-card h3,
+.user-howto h3 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+.link-card > p:not(.eyebrow),
+.user-howto > p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.invite-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+.invite-form label {
+  display: grid;
+  gap: 6px;
+  color: #56625f;
+  font-size: 12px;
+  font-weight: bold;
+}
+.invite-form input,
+.invite-form select {
+  width: 100%;
+  border: 1px solid #d7ddd9;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  color: var(--ink);
+}
+.invite-form .two-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.invite-form .primary {
+  justify-self: start;
+}
+.users-message {
+  margin: 14px 0 0;
+  color: #287d5b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.user-howto {
+  background: #fffaf0;
+}
+.user-howto ol {
+  padding-left: 20px;
+  margin: 18px 0;
+  display: grid;
+  gap: 10px;
+  color: #535d59;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.users-list-card {
+  padding: 0;
+  overflow: hidden;
+}
+.users-list-card .card-head {
+  padding: 21px;
+}
+.users-list {
+  border-top: 1px solid var(--line);
+}
+.users-list article,
+.pending-invites article {
+  display: grid;
+  grid-template-columns: 40px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 21px;
+  border-bottom: 1px solid var(--line);
+}
+.users-list article:last-child {
+  border-bottom: 0;
+}
+.user-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #f5ebd1;
+  color: #9d782d;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: bold;
+}
+.users-list article > div,
+.pending-invites article > div {
+  display: grid;
+  gap: 4px;
+}
+.users-list strong,
+.pending-invites strong {
+  font-size: 13px;
+}
+.users-list small,
+.pending-invites small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.pending-invites {
+  margin-top: 20px;
+  padding: 0;
+}
+.pending-invites > .eyebrow {
+  padding: 20px 21px 0;
+}
+.pending-invites article {
+  grid-template-columns: 1fr auto;
+}
+.pending-invites article:last-child {
+  border-bottom: 0;
+}
+@media (max-width: 780px) {
+  .users-hero {
+    display: block;
+    padding: 25px;
+  }
+  .users-count {
+    width: max-content;
+    margin-top: 18px;
+  }
+  .users-grid {
+    grid-template-columns: 1fr;
+  }
+  .users-list article {
+    grid-template-columns: 38px 1fr auto;
+  }
+  .users-list article .badge:last-child {
+    display: none;
+  }
+}
+@media (max-width: 500px) {
+  .invite-form .two-fields {
+    grid-template-columns: 1fr;
+  }
+  .users-list article {
+    padding: 14px;
+  }
+  .users-list small {
+    max-width: 175px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
 .auth-shell {
   min-height: 100vh;
   display: grid;

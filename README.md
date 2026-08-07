@@ -60,4 +60,4 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Para el primer acceso se crea una cuenta de correo en Supabase Auth. Esa cuenta inicializa el superadministrador y el **Almacén Central**.
+Comparte el enlace de THOR para que cada persona cree su propia cuenta. Las cuentas nuevas inician como **Vendedor** y un administrador puede ajustar su rol desde el módulo **Usuarios**.

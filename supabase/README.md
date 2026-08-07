@@ -13,11 +13,9 @@ Duplica `.env.example` como `.env.local` y completa únicamente tus valores. El 
 
 No publiques `SUPABASE_SERVICE_ROLE_KEY`: esa clave permite administrar toda la base de datos.
 
-## Crear los demás usuarios
+## Crear los demas usuarios
 
-1. Ejecuta también `migrations/202608060004_user_invites.sql` en Supabase SQL Editor.
-2. En THOR, ingresa con el superadministrador o administrador y abre **Usuarios**.
-3. Crea la invitación con nombre, correo, sede y rol.
-4. La persona abre THOR, elige **"Activa tu acceso"** y usa ese mismo correo para definir su contraseña.
-
-El usuario recibe el rol que definiste previamente; no puede elegir permisos al registrarse.
+1. Ejecuta `migrations/202608060005_simple_user_signup.sql` en Supabase SQL Editor.
+2. Comparte el enlace de THOR con cada persona.
+3. Cada persona pulsa **Crear cuenta**, registra su nombre, correo y contrasena.
+4. La cuenta queda como **Vendedor**. Un administrador puede cambiarla a **Administrador** en el modulo **Usuarios**.
