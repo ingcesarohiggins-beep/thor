@@ -24,3 +24,7 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.
+
+## Datos de prueba
+
+`seed_demo.sql` carga un catálogo identificado por `DEMO-`: iPhone 14 en adelante, Galaxy S24 en adelante, cargadores de distintas potencias y accesorios Apple. Ejecuta en una sola consulta `set app.thor_seed_demo = 'true';` seguido del contenido del archivo. Cuando terminen las pruebas, usa `cleanup_demo.sql` con su protección indicada; no borrará productos reales.

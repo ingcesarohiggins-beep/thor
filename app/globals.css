@@ -1040,13 +1040,19 @@ p {
   inset: 0;
   background: rgba(18, 29, 37, 0.62);
   display: grid;
-  place-items: center;
-  padding: 20px;
+  place-items: start center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
   z-index: 3;
 }
 .modal {
   position: relative;
   width: min(100%, 440px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: auto 0;
   background: #fff;
   border-radius: 13px;
   padding: 27px;
@@ -1084,6 +1090,16 @@ p {
   background: transparent;
   font-size: 26px;
   color: #7c8588;
+}
+@media (max-width: 520px) {
+  .modal-backdrop {
+    padding: 10px;
+  }
+  .modal {
+    max-height: calc(100dvh - 20px);
+    border-radius: 12px;
+    padding: 22px 18px;
+  }
 }
 .mobile-nav {
   display: none;
