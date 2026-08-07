@@ -12,3 +12,12 @@ La primera cuenta creada en Supabase Auth se convierte en el superadministrador 
 Duplica `.env.example` como `.env.local` y completa únicamente tus valores. El archivo local queda ignorado por Git.
 
 No publiques `SUPABASE_SERVICE_ROLE_KEY`: esa clave permite administrar toda la base de datos.
+
+## Crear los demás usuarios
+
+1. Ejecuta también `migrations/202608060004_user_invites.sql` en Supabase SQL Editor.
+2. En THOR, ingresa con el superadministrador o administrador y abre **Usuarios**.
+3. Crea la invitación con nombre, correo, sede y rol.
+4. La persona abre THOR, elige **"Activa tu acceso"** y usa ese mismo correo para definir su contraseña.
+
+El usuario recibe el rol que definiste previamente; no puede elegir permisos al registrarse.
