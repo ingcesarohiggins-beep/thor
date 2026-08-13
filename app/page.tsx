@@ -14,6 +14,8 @@ type Section =
   | "inventario"
   | "ventas"
   | "caja"
+  | "clientes"
+  | "proveedores"
   | "usuarios"
   | "manuales";
 type StockItem = {
@@ -62,6 +64,23 @@ type ExpenseRecord = {
 type UserRole = "superadmin" | "admin" | "seller";
 type Payment = { method: string; amount: number | "" };
 type Customer = { name: string; dni: string; phone: string; address: string };
+type CustomerRecord = {
+  id: string;
+  name: string;
+  dni: string | null;
+  phone: string | null;
+  address: string | null;
+  active: boolean;
+};
+type SupplierRecord = {
+  id: string;
+  name: string;
+  ruc: string | null;
+  phone: string | null;
+  contact: string | null;
+  address: string | null;
+  active: boolean;
+};
 type ManagedUser = {
   id: string;
   name: string;
@@ -95,6 +114,7 @@ export default function Home() {
   });
   const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
   const [salesView, setSalesView] = useState<"new" | "history">("new");
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<StockItem[]>([]);
   const [customer, setCustomer] = useState<Customer>(emptyCustomer);
@@ -264,6 +284,21 @@ export default function Home() {
     // refresh intentionally runs after the session token changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    if (!supabase || !actor) return;
+    const loadTimer = window.setTimeout(() => {
+      void supabase
+        .from("customers")
+        .select("id, name, dni, phone, address, active")
+        .eq("active", true)
+        .order("name")
+        .then((result) => {
+          if (!result.error) setCustomers(result.data as CustomerRecord[]);
+        });
+    }, 0);
+    return () => window.clearTimeout(loadTimer);
+  }, [actor, supabase]);
 
   const addToCart = (item: StockItem) => {
     setCart((current) => {
@@ -474,6 +509,8 @@ export default function Home() {
               "inventario",
               "ventas",
               "caja",
+              "clientes",
+              "proveedores",
               "usuarios",
               "manuales",
             ] as Section[]
@@ -493,6 +530,10 @@ export default function Home() {
                       ? "▱"
                       : name === "caja"
                         ? "◫"
+                        : name === "clientes"
+                          ? "♙"
+                          : name === "proveedores"
+                            ? "▤"
                         : name === "usuarios"
                           ? "♙"
                           : "?"}{" "}
@@ -699,6 +740,40 @@ export default function Home() {
                 <h2>Confirmar venta</h2>
                 <div className="customer">
                   <label>
+                    Cliente registrado
+                    <select
+                      value={
+                        customers.find(
+                          (item) =>
+                            item.name === customer.name &&
+                            item.dni === (customer.dni || null),
+                        )?.id ?? ""
+                      }
+                      onChange={(event) => {
+                        const selected = customers.find(
+                          (item) => item.id === event.target.value,
+                        );
+                        setCustomer(
+                          selected
+                            ? {
+                                name: selected.name,
+                                dni: selected.dni ?? "",
+                                phone: selected.phone ?? "",
+                                address: selected.address ?? "",
+                              }
+                            : emptyCustomer,
+                        );
+                      }}
+                    >
+                      <option value="">Cliente general</option>
+                      {customers.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}{item.dni ? ` · DNI ${item.dni}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
                     Cliente
                     <input
                       value={customer.name}
@@ -714,6 +789,16 @@ export default function Home() {
                       value={customer.dni}
                       onChange={(event) =>
                         setCustomer({ ...customer, dni: event.target.value })
+                      }
+                      placeholder="Opcional"
+                    />
+                  </label>
+                  <label>
+                    Teléfono
+                    <input
+                      value={customer.phone}
+                      onChange={(event) =>
+                        setCustomer({ ...customer, phone: event.target.value })
                       }
                       placeholder="Opcional"
                     />
@@ -898,6 +983,18 @@ export default function Home() {
         {section === "caja" && (
           <CashCenter actor={actor} metrics={metrics} onChanged={refresh} />
         )}
+        {section === "clientes" && actor && (
+          <CustomerCenter
+            actor={actor}
+            customers={customers}
+            onCreated={(created) =>
+              setCustomers((current) =>
+                [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
+              )
+            }
+          />
+        )}
+        {section === "proveedores" && actor && <SupplierCenter actor={actor} />}
         {section === "usuarios" && actor && <UserCenter actor={actor} />}
         {section === "manuales" && (
           <ManualCenter
@@ -1171,6 +1268,139 @@ function ExpenseList({ expenses }: { expenses: ExpenseRecord[] }) {
 function CashSessionList({ sessions }: { sessions: CashSession[] }) {
   if (!sessions.length) return <p className="empty">Aún no hay sesiones de caja.</p>;
   return <div className="cash-list">{sessions.map((session) => <article key={session.id}><div><strong>{session.closed_at ? "Caja cerrada" : "Caja abierta"}</strong><small>{new Date(session.opened_at).toLocaleString("es-PE")}</small></div><div className="cash-session-values"><b>Inicio {money.format(Number(session.opening_cash))}</b>{session.closed_at && <small>Arqueo {money.format(Number(session.counted_cash ?? 0))}</small>}</div></article>)}</div>;
+}
+
+function CustomerCenter({
+  actor,
+  customers,
+  onCreated,
+}: {
+  actor: { id: string; name: string; role: string; locationId: string };
+  customers: CustomerRecord[];
+  onCreated: (customer: CustomerRecord) => void;
+}) {
+  const supabase = getSupabaseBrowser();
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const visibleCustomers = customers.filter((customer) =>
+    `${customer.name} ${customer.dni ?? ""} ${customer.phone ?? ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+
+  const createCustomer = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    const result = await supabase
+      .from("customers")
+      .insert({
+        name: String(form.get("name") ?? "").trim(),
+        dni: String(form.get("dni") ?? "").trim() || null,
+        phone: String(form.get("phone") ?? "").trim() || null,
+        address: String(form.get("address") ?? "").trim() || null,
+        created_by: actor.id,
+        active: true,
+      })
+      .select("id, name, dni, phone, address, active")
+      .single();
+    setSaving(false);
+    if (result.error) {
+      setMessage(
+        result.error.code === "23505"
+          ? "Ya existe un cliente con ese DNI."
+          : result.error.message,
+      );
+      return;
+    }
+    event.currentTarget.reset();
+    onCreated(result.data as CustomerRecord);
+    setMessage("Cliente registrado correctamente.");
+  };
+
+  return (
+    <div className="content directory-page">
+      <section className="directory-hero">
+        <div><p className="eyebrow">BASE COMERCIAL</p><h2>Clientes</h2><p>Registra personas con DNI y reutiliza sus datos al vender. Si no deseas identificar a la persona, selecciona Cliente general.</p></div>
+        <div className="users-count"><strong>{customers.length}</strong><span>clientes registrados</span></div>
+      </section>
+      <div className="directory-grid">
+        <section className="card">
+          <p className="eyebrow">NUEVO CLIENTE</p><h3>Registrar cliente</h3>
+          <form className="directory-form" onSubmit={createCustomer}>
+            <label>Nombre completo<input name="name" required placeholder="Ej. María Pérez" /></label>
+            <div className="two-fields"><label>DNI<input name="dni" inputMode="numeric" maxLength={12} placeholder="Opcional" /></label><label>Teléfono<input name="phone" placeholder="Opcional" /></label></div>
+            <label>Dirección<input name="address" placeholder="Opcional" /></label>
+            <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Guardar cliente"}</button>
+          </form>
+          {message && <p className="users-message" role="status">{message}</p>}
+        </section>
+        <section className="card customer-general-card">
+          <p className="eyebrow">VENTA RÁPIDA</p><h3>Cliente general</h3>
+          <p>En una venta puedes dejar el cliente como general. Si luego deseas identificarlo, regístralo aquí y selecciónalo directamente desde la pantalla de venta.</p>
+          <span className="badge neutral">No requiere DNI</span>
+        </section>
+      </div>
+      <section className="card directory-list-card">
+        <div className="card-head"><div><p className="eyebrow">DIRECTORIO</p><h3>Clientes registrados</h3></div><label className="search directory-search">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, DNI o teléfono" /></label></div>
+        {visibleCustomers.length ? <div className="directory-list">{visibleCustomers.map((customer) => <article key={customer.id}><span className="user-avatar">{customer.name.slice(0, 2).toUpperCase()}</span><div><strong>{customer.name}</strong><small>{customer.dni ? `DNI ${customer.dni}` : "Sin DNI"}{customer.phone ? ` · ${customer.phone}` : ""}{customer.address ? ` · ${customer.address}` : ""}</small></div><span className="badge success">Activo</span></article>)}</div> : <p className="empty">No se encontraron clientes.</p>}
+      </section>
+    </div>
+  );
+}
+
+function SupplierCenter({ actor }: { actor: { id: string; name: string; role: string; locationId: string } }) {
+  const supabase = getSupabaseBrowser();
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const canManage = actor.role !== "seller";
+  const load = useCallback(async () => {
+    if (!supabase) return;
+    const result = await supabase.from("suppliers").select("id, name, ruc, phone, contact, address, active").order("name");
+    if (result.error) return setMessage("No se pudieron cargar los proveedores.");
+    setSuppliers(result.data as SupplierRecord[]);
+  }, [supabase]);
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(loadTimer);
+  }, [load]);
+  const createSupplier = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    const result = await supabase.from("suppliers").insert({
+      name: String(form.get("name") ?? "").trim(),
+      ruc: String(form.get("ruc") ?? "").trim() || null,
+      phone: String(form.get("phone") ?? "").trim() || null,
+      contact: String(form.get("contact") ?? "").trim() || null,
+      address: String(form.get("address") ?? "").trim() || null,
+      active: true,
+    });
+    setSaving(false);
+    if (result.error) return setMessage(result.error.message);
+    event.currentTarget.reset();
+    setMessage("Proveedor registrado correctamente.");
+    await load();
+  };
+  return (
+    <div className="content directory-page">
+      <section className="directory-hero"><div><p className="eyebrow">COMPRAS Y ABASTECIMIENTO</p><h2>Proveedores</h2><p>Centraliza RUC, contacto y teléfono de quienes abastecen la operación.</p></div><div className="users-count"><strong>{suppliers.filter((item) => item.active).length}</strong><span>proveedores activos</span></div></section>
+      <div className="directory-grid">
+        <section className="card"><p className="eyebrow">NUEVO PROVEEDOR</p><h3>Registrar proveedor</h3>
+          {canManage ? <form className="directory-form" onSubmit={createSupplier}><label>Razón social o nombre<input name="name" required placeholder="Ej. Distribuidora Lima SAC" /></label><div className="two-fields"><label>RUC<input name="ruc" inputMode="numeric" maxLength={16} placeholder="Opcional" /></label><label>Teléfono<input name="phone" placeholder="Opcional" /></label></div><label>Contacto<input name="contact" placeholder="Ej. Luis Torres" /></label><label>Dirección<input name="address" placeholder="Opcional" /></label><button className="primary" disabled={saving}>{saving ? "Guardando..." : "Guardar proveedor"}</button></form> : <p className="empty">El vendedor puede consultar proveedores; el registro es administrativo.</p>}
+          {message && <p className="users-message" role="status">{message}</p>}
+        </section>
+        <section className="card customer-general-card"><p className="eyebrow">SIGUIENTE PASO</p><h3>Ingreso de mercadería</h3><p>Los proveedores registrados estarán disponibles para asociar nuevos lotes y compras de inventario.</p><span className="badge neutral">Control administrativo</span></section>
+      </div>
+      <section className="card directory-list-card"><div className="card-head"><div><p className="eyebrow">DIRECTORIO</p><h3>Proveedores registrados</h3></div><span className="badge success">{suppliers.length} registrados</span></div>
+        {suppliers.length ? <div className="directory-list">{suppliers.map((supplier) => <article key={supplier.id}><span className="user-avatar">{supplier.name.slice(0, 2).toUpperCase()}</span><div><strong>{supplier.name}</strong><small>{supplier.ruc ? `RUC ${supplier.ruc}` : "Sin RUC"}{supplier.contact ? ` · ${supplier.contact}` : ""}{supplier.phone ? ` · ${supplier.phone}` : ""}{supplier.address ? ` · ${supplier.address}` : ""}</small></div><span className={supplier.active ? "badge success" : "badge warning"}>{supplier.active ? "Activo" : "Inactivo"}</span></article>)}</div> : <p className="empty">Aún no hay proveedores registrados.</p>}
+      </section>
+    </div>
+  );
 }
 
 function QuickGuide({

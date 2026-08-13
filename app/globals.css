@@ -988,6 +988,89 @@ p {
 .cash-session-values {
   text-align: right;
 }
+.directory-page {
+  max-width: 1250px;
+}
+.directory-hero {
+  background: linear-gradient(110deg, #1b2b35, #293e46);
+  color: #fff;
+  border-radius: 14px;
+  padding: 28px 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  margin-bottom: 20px;
+}
+.directory-hero h2 {
+  margin: 4px 0 8px;
+  font-size: 26px;
+}
+.directory-hero p:not(.eyebrow) {
+  color: #c1cbd0;
+  margin: 0;
+  font-size: 13px;
+}
+.directory-hero .eyebrow {
+  color: #d6b966;
+}
+.directory-grid {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 17px;
+  margin-bottom: 17px;
+}
+.directory-form {
+  display: grid;
+  gap: 13px;
+  margin-top: 17px;
+}
+.directory-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: bold;
+}
+.directory-form input {
+  border: 1px solid #dce0dc;
+  border-radius: 7px;
+  padding: 10px;
+  color: var(--ink);
+}
+.customer-general-card {
+  background: #f7f8f5;
+}
+.customer-general-card p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.directory-list-card {
+  padding: 20px;
+}
+.directory-search {
+  min-width: 250px;
+}
+.directory-list article {
+  display: grid;
+  grid-template-columns: 39px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.directory-list article:last-child {
+  border-bottom: 0;
+}
+.directory-list article > div {
+  display: grid;
+  gap: 4px;
+}
+.directory-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
 .catalog {
   padding: 26px 32px 35px 42px;
 }
@@ -1264,6 +1347,9 @@ p {
   .cash-grid {
     grid-template-columns: 1fr;
   }
+  .directory-grid {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 650px) {
   .thor-app {
@@ -1397,6 +1483,27 @@ p {
   }
   .sale-products {
     grid-template-columns: 1fr 1fr;
+  }
+  .directory-hero {
+    display: block;
+    padding: 20px;
+  }
+  .directory-hero .users-count {
+    margin-top: 15px;
+  }
+  .directory-list-card .card-head {
+    display: grid;
+    gap: 13px;
+  }
+  .directory-search {
+    min-width: 0;
+    max-width: none;
+  }
+  .directory-list article {
+    grid-template-columns: 35px 1fr;
+  }
+  .directory-list .badge {
+    display: none;
   }
   .cart {
     border-left: 0;
