@@ -1969,6 +1969,235 @@ p {
   color: #54d491;
   font-size: 12px;
 }
+.purchases-page {
+  max-width: 1320px;
+}
+.purchases-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 30px;
+  padding: 28px 32px;
+  border-radius: 15px;
+  background: linear-gradient(120deg, #172a35, #2b4650);
+  color: #fff;
+  box-shadow: 0 14px 30px #1325301c;
+}
+.purchases-hero .eyebrow {
+  color: #e3c36f;
+}
+.purchases-hero h2 {
+  margin: 0 0 9px;
+  font-size: 29px;
+}
+.purchases-hero p:not(.eyebrow) {
+  max-width: 680px;
+  margin: 0;
+  color: #d4dedf;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.purchase-total {
+  min-width: 215px;
+  display: grid;
+  gap: 5px;
+  padding: 16px 19px;
+  border: 1px solid #ffffff2e;
+  border-radius: 11px;
+  background: #ffffff13;
+}
+.purchase-total span,
+.purchase-total small {
+  color: #c9d6d8;
+  font-size: 11px;
+}
+.purchase-total strong {
+  color: #f0cb69;
+  font-size: 23px;
+}
+.purchase-form {
+  display: grid;
+  gap: 17px;
+  margin-top: 18px;
+}
+.purchase-header-card,
+.purchase-lines-card,
+.recent-lots {
+  border-radius: 13px;
+}
+.purchase-header-card .card-head,
+.purchase-lines-card .card-head {
+  margin-bottom: 19px;
+}
+.purchase-header-card h3,
+.purchase-lines-card h3,
+.recent-lots h3 {
+  margin: 0;
+  font-size: 19px;
+}
+.purchase-lines-card .card-head p:not(.eyebrow) {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.purchase-fields {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1.35fr 1fr;
+  gap: 15px;
+}
+.purchase-fields label,
+.purchase-line label,
+.identifiers-field {
+  display: grid;
+  gap: 7px;
+  color: #3c474c;
+  font-size: 12px;
+  font-weight: 700;
+}
+.purchase-fields input,
+.purchase-fields select,
+.purchase-line input,
+.purchase-line select,
+.identifiers-field textarea {
+  min-height: 42px;
+  width: 100%;
+  border: 1px solid #d6ddd8;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 11px;
+  font: inherit;
+  font-weight: 400;
+  outline: none;
+}
+.purchase-fields select,
+.purchase-line select {
+  cursor: pointer;
+  appearance: auto;
+}
+.purchase-fields input:focus,
+.purchase-fields select:focus,
+.purchase-line input:focus,
+.purchase-line select:focus,
+.identifiers-field textarea:focus {
+  border-color: #b9943e;
+  box-shadow: 0 0 0 3px #f8efda;
+}
+.purchase-fields small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+.purchase-tip {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f6f8f5;
+  color: #59665f;
+  font-size: 12px;
+}
+.purchase-lines {
+  display: grid;
+  gap: 14px;
+}
+.purchase-line {
+  border: 1px solid #e3e8e3;
+  border-radius: 10px;
+  background: #fbfcfa;
+  padding: 16px;
+}
+.line-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 13px;
+  color: #334047;
+  font-size: 13px;
+}
+.danger {
+  color: #a64242;
+}
+.purchase-line-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1.25fr 0.7fr 0.85fr 0.85fr;
+  gap: 11px;
+}
+.identifiers-field {
+  margin-top: 12px;
+}
+.identifiers-field textarea {
+  min-height: 75px;
+  resize: vertical;
+}
+.line-subtotal {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 13px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.line-subtotal strong {
+  color: #29433b;
+}
+.purchase-submit {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 20px;
+  margin-top: 20px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+.purchase-submit > div {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+.purchase-submit span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.purchase-submit strong {
+  font-size: 21px;
+}
+.recent-lots {
+  margin-top: 17px;
+  padding: 0;
+  overflow: hidden;
+}
+.recent-lots .card-head {
+  padding: 20px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 1100px) {
+  .purchase-fields,
+  .purchase-line-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .purchases-hero,
+  .purchase-submit {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .purchase-total {
+    width: 100%;
+  }
+  .purchase-fields,
+  .purchase-line-grid {
+    grid-template-columns: 1fr;
+  }
+  .purchase-submit > div {
+    text-align: left;
+  }
+  .purchase-submit .primary {
+    width: 100%;
+  }
+}
 .manuals-page {
   max-width: 1260px;
 }

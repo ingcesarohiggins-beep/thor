@@ -12,6 +12,7 @@ import {
 type Section =
   | "inicio"
   | "inventario"
+  | "compras"
   | "ventas"
   | "caja"
   | "clientes"
@@ -82,6 +83,15 @@ type SupplierRecord = {
   address: string | null;
   active: boolean;
 };
+type PurchaseLine = {
+  sku: string;
+  name: string;
+  category: "accessory" | "phone" | "laptop" | "tablet";
+  quantity: number;
+  unit_cost: number | "";
+  sale_price: number | "";
+  identifiers: string;
+};
 type ManagedUser = {
   id: string;
   name: string;
@@ -117,6 +127,15 @@ const money = new Intl.NumberFormat("es-PE", {
 });
 const emptyCustomer: Customer = { name: "", dni: "", phone: "", address: "" };
 const newPayment = (): Payment => ({ method: "Efectivo", amount: "" });
+const newPurchaseLine = (): PurchaseLine => ({
+  sku: "",
+  name: "",
+  category: "accessory",
+  quantity: 1,
+  unit_cost: "",
+  sale_price: "",
+  identifiers: "",
+});
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
@@ -679,6 +698,7 @@ export default function Home() {
 
   const openNewRecord = () => {
     const targetBySection: Partial<Record<Section, string>> = {
+      compras: "new-purchase",
       clientes: "new-customer",
       proveedores: "new-supplier",
       usuarios: "new-user",
@@ -699,7 +719,9 @@ export default function Home() {
   };
 
   const newRecordLabel =
-    section === "clientes"
+    section === "compras"
+      ? "Nueva recepción"
+      : section === "clientes"
       ? "Nuevo cliente"
       : section === "proveedores"
         ? "Nuevo proveedor"
@@ -760,6 +782,7 @@ export default function Home() {
             [
               "inicio",
               "inventario",
+              "compras",
               "ventas",
               "caja",
               "clientes",
@@ -768,7 +791,11 @@ export default function Home() {
               "manuales",
             ] as Section[]
           )
-            .filter((name) => name !== "usuarios" || actor?.role !== "seller")
+            .filter(
+              (name) =>
+                (name !== "usuarios" && name !== "compras") ||
+                actor?.role !== "seller",
+            )
             .map((name) => (
               <button
                 key={name}
@@ -779,6 +806,8 @@ export default function Home() {
                   ? "⌂"
                   : name === "inventario"
                     ? "▦"
+                    : name === "compras"
+                      ? "▣"
                     : name === "ventas"
                       ? "▱"
                       : name === "caja"
@@ -974,6 +1003,14 @@ export default function Home() {
               )}
             </section>
           </div>
+        )}
+        {section === "compras" && actor && actor.role !== "seller" && (
+          <PurchaseCenter
+            actor={{ ...actor, locationId: operationLocationId }}
+            locationName={operationLocationName}
+            cashOpen={cashOpen}
+            onCompleted={refresh}
+          />
         )}
         {section === "ventas" && (
           <div className="sale-layout">
@@ -1399,6 +1436,140 @@ function SalesList({ sales, compact = false }: { sales: SaleRecord[]; compact?: 
           <b>{money.format(Number(sale.total))}</b>
         </article>
       ))}
+    </div>
+  );
+}
+
+function PurchaseCenter({
+  actor,
+  locationName,
+  cashOpen,
+  onCompleted,
+}: {
+  actor: { id: string; name: string; role: string; locationId: string };
+  locationName: string;
+  cashOpen: boolean;
+  onCompleted: () => Promise<void>;
+}) {
+  const supabase = getSupabaseBrowser();
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [recentLots, setRecentLots] = useState<Array<{ id: string; code: string; receipt_number: string | null; total_cost: number; created_at: string; suppliers: { name: string }[] }>>([]);
+  const [supplierId, setSupplierId] = useState("");
+  const [receiptNumber, setReceiptNumber] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [invoice, setInvoice] = useState<File | null>(null);
+  const [lines, setLines] = useState<PurchaseLine[]>([newPurchaseLine()]);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async () => {
+    if (!supabase) return;
+    const [supplierResult, lotResult] = await Promise.all([
+      supabase.from("suppliers").select("id, name, ruc, phone, contact, address, active").eq("active", true).order("name"),
+      supabase.from("receipt_lots").select("id, code, receipt_number, total_cost, created_at, suppliers(name)").eq("location_id", actor.locationId).order("created_at", { ascending: false }).limit(8),
+    ]);
+    if (supplierResult.error || lotResult.error) {
+      setMessage("No se pudieron cargar proveedores o recepciones.");
+      return;
+    }
+    setSuppliers((supplierResult.data ?? []) as SupplierRecord[]);
+    setRecentLots((lotResult.data ?? []) as Array<{ id: string; code: string; receipt_number: string | null; total_cost: number; created_at: string; suppliers: { name: string }[] }>);
+  }, [actor.locationId, supabase]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  const total = lines.reduce(
+    (sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_cost || 0),
+    0,
+  );
+  const updateLine = <K extends keyof PurchaseLine>(index: number, key: K, value: PurchaseLine[K]) => {
+    setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, [key]: value } : line));
+  };
+
+  const savePurchase = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !supplierId || !receiptNumber.trim()) {
+      setMessage("Selecciona el proveedor e ingresa el número de factura o guía.");
+      return;
+    }
+    if (!lines.length || lines.some((line) => !line.sku.trim() || !line.name.trim() || !line.quantity || line.unit_cost === "" || line.sale_price === "")) {
+      setMessage("Completa SKU, producto, cantidad, costo y precio en cada línea.");
+      return;
+    }
+    if ((paymentMethod === "cash_box" || paymentMethod === "central_cash") && !cashOpen) {
+      setMessage("Abre tu caja antes de registrar un pago en efectivo.");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      let invoicePath = "";
+      if (invoice) {
+        const extension = invoice.name.split(".").pop() || "file";
+        invoicePath = `receipts/${actor.id}/${crypto.randomUUID()}.${extension}`;
+        const upload = await supabase.storage.from("thor-files").upload(invoicePath, invoice, { contentType: invoice.type || "application/octet-stream" });
+        if (upload.error) throw upload.error;
+      }
+      const result = await supabase.rpc("receive_supplier_lot", {
+        p_supplier_id: supplierId,
+        p_location_id: actor.locationId,
+        p_receipt_number: receiptNumber.trim(),
+        p_payment_method: paymentMethod,
+        p_receipt_photo_path: invoicePath,
+        p_lines: lines.map((line) => ({
+          sku: line.sku.trim(),
+          name: line.name.trim(),
+          category: line.category,
+          quantity: Number(line.quantity),
+          unit_cost: Number(line.unit_cost),
+          sale_price: Number(line.sale_price),
+          identifiers: line.identifiers.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean),
+        })),
+      });
+      if (result.error) throw result.error;
+      const data = result.data as { code?: string } | null;
+      setSupplierId("");
+      setReceiptNumber("");
+      setInvoice(null);
+      setLines([newPurchaseLine()]);
+      setMessage(`Recepción ${data?.code ?? ""} registrada y pagada correctamente.`);
+      await Promise.all([load(), onCompleted()]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo registrar la compra.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="content purchases-page">
+      <section className="purchases-hero">
+        <div><p className="eyebrow">ABASTECIMIENTO Y TESORERÍA</p><h2>Compras y recepción por lote</h2><p>Registra una llegada completa, su factura y el pago inmediato. El stock entra directamente a <strong>{locationName}</strong>.</p></div>
+        <div className="purchase-total"><span>Total de la recepción</span><strong>{money.format(total)}</strong><small>Sin crédito a proveedores</small></div>
+      </section>
+      <form className="purchase-form" id="new-purchase" onSubmit={savePurchase}>
+        <section className="card purchase-header-card">
+          <div className="card-head"><div><p className="eyebrow">01 · DOCUMENTO Y PAGO</p><h3>Datos de la llegada</h3></div><span className="badge success">Pago inmediato</span></div>
+          <div className="purchase-fields">
+            <label>Proveedor<select value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required><option value="">Selecciona un proveedor</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.ruc ? ` · RUC ${supplier.ruc}` : ""}</option>)}</select></label>
+            <label>Factura o guía<input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value)} required placeholder="Ej. F001-000245" /></label>
+            <label>Origen del pago<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="bank_transfer">Transferencia bancaria · tesorería central</option><option value="yape_plin">Yape / Plin · tesorería central</option><option value="cash_box">Efectivo · caja de esta sede</option><option value="central_cash">Efectivo · caja central</option></select></label>
+            <label>Factura o comprobante<input type="file" accept="image/*,.pdf" onChange={(event) => setInvoice(event.target.files?.[0] ?? null)} /><small>Opcional: imagen o PDF.</small></label>
+          </div>
+          {(paymentMethod === "cash_box" || paymentMethod === "central_cash") && !cashOpen && <p className="cash-required"><strong>La caja está cerrada.</strong> Abre tu caja antes de pagar esta recepción en efectivo.</p>}
+          {paymentMethod === "central_cash" && <p className="purchase-tip">Para usar efectivo central, selecciona primero <strong>Almacén Central</strong> como sede activa.</p>}
+        </section>
+        <section className="card purchase-lines-card">
+          <div className="card-head"><div><p className="eyebrow">02 · PRODUCTOS DEL LOTE</p><h3>Mercadería recibida</h3><p>Para cargadores usa cantidad. Para celulares, registra un IMEI o serie por cada unidad.</p></div><button type="button" className="secondary" onClick={() => setLines((current) => [...current, newPurchaseLine()])}>＋ Agregar producto</button></div>
+          <div className="purchase-lines">{lines.map((line, index) => <article key={index} className="purchase-line"><div className="line-title"><strong>Producto {String(index + 1).padStart(2, "0")}</strong>{lines.length > 1 && <button type="button" className="text-button danger" onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}>Quitar</button>}</div><div className="purchase-line-grid"><label>SKU<input value={line.sku} onChange={(event) => updateLine(index, "sku", event.target.value)} placeholder="Ej. APP-CHG-20W" required /></label><label>Producto<input value={line.name} onChange={(event) => updateLine(index, "name", event.target.value)} placeholder="Ej. Cargador USB-C 20W" required /></label><label>Tipo<select value={line.category} onChange={(event) => updateLine(index, "category", event.target.value as PurchaseLine["category"])}><option value="accessory">Accesorio / cargador</option><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>Cantidad<input type="number" min="1" value={line.quantity} onChange={(event) => updateLine(index, "quantity", Math.max(1, Number(event.target.value)))} required /></label><label>Costo unitario<input type="number" min="0" step="0.01" value={line.unit_cost} onChange={(event) => updateLine(index, "unit_cost", event.target.value === "" ? "" : Number(event.target.value))} required /></label><label>Precio de venta<input type="number" min="0" step="0.01" value={line.sale_price} onChange={(event) => updateLine(index, "sale_price", event.target.value === "" ? "" : Number(event.target.value))} required /></label></div>{line.category !== "accessory" && <label className="identifiers-field">IMEI o serie <textarea value={line.identifiers} onChange={(event) => updateLine(index, "identifiers", event.target.value)} required placeholder="Uno por línea o separado por comas. Debe coincidir con la cantidad." /></label>}<div className="line-subtotal">Subtotal de línea <strong>{money.format(Number(line.quantity || 0) * Number(line.unit_cost || 0))}</strong></div></article>)}</div>
+          <div className="purchase-submit"><div><span>Total pagado al proveedor</span><strong>{money.format(total)}</strong></div><button className="primary" type="submit" disabled={saving || !total}>{saving ? "Registrando recepción..." : "Confirmar recepción y pago"}</button></div>
+          {message && <p className="users-message" role="status">{message}</p>}
+        </section>
+      </form>
+      <section className="card recent-lots"><div className="card-head"><div><p className="eyebrow">HISTORIAL DE LA SEDE</p><h3>Últimas recepciones</h3></div><span className="badge neutral">{recentLots.length} recientes</span></div>{recentLots.length ? <div className="cash-list">{recentLots.map((lot) => <article key={lot.id}><div><strong>{lot.code}</strong><small>{lot.suppliers?.[0]?.name ?? "Proveedor"} · Factura {lot.receipt_number ?? "sin número"} · {new Date(lot.created_at).toLocaleDateString("es-PE")}</small></div><b>{money.format(Number(lot.total_cost))}</b></article>)}</div> : <p className="empty">Aún no hay lotes registrados para esta sede.</p>}</section>
     </div>
   );
 }
@@ -2212,6 +2383,11 @@ function ManualCenter({
       "Activo",
     ],
     [
+      "Compras y lotes",
+      "Recibe mercadería por factura, registra accesorios por cantidad y equipos por IMEI, con pago inmediato y trazabilidad de proveedor.",
+      "Activo",
+    ],
+    [
       "Usuarios y sedes",
       "El superadministrador crea administradores; los administradores crean vendedores para cada almacén.",
       "Activo",
@@ -2228,6 +2404,7 @@ function ManualCenter({
         ? [
             "Puedes cambiar la sede operativa desde el menú lateral y revisar cada almacén.",
             "Puedes crear vendedores para cualquier sede, controlar inventario, ventas, caja y gastos.",
+            "Puedes recibir lotes de proveedores y pagar desde caja de sede, caja central o tesorería.",
             "No puedes crear administradores ni cambiar privilegios de usuarios.",
           ]
         : [

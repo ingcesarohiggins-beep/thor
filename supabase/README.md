@@ -41,6 +41,13 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 2. La etiqueta verde **Conectado** en el menú lateral confirma que THOR está conectado a Supabase sin ocupar el área principal.
 3. En **Usuarios**, el Superadministrador verá usuarios conectados, tiempo desde el inicio de actividad, última señal y una bitácora. Administradores y vendedores no pueden consultar esos datos.
 
+## Compras y recepción por lote
+
+1. Ejecuta `migrations/202608130011_purchase_lots_and_supplier_payments.sql` para habilitar **Compras**.
+2. Las compras son de pago inmediato: transferencia bancaria, Yape/Plin desde tesorería central o efectivo desde una caja abierta.
+3. El efectivo central se registra con la sede **Almacén Central** activa; el efectivo de una sede se descuenta únicamente de su propia caja.
+4. Los accesorios ingresan por cantidad y costo promedio. Los celulares, laptops y tablets requieren un IMEI o serie por cada unidad recibida.
+
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.
