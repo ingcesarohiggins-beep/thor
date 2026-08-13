@@ -427,6 +427,8 @@ button {
   flex-direction: column;
   position: fixed;
   inset: 0 auto 0 0;
+  padding-bottom: 88px;
+  overflow: hidden;
 }
 .brand {
   color: #d0ad55;
@@ -480,6 +482,11 @@ button {
 .side-nav nav {
   display: grid;
   gap: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+  padding-bottom: 8px;
 }
 .nav-item {
   border: 0;
@@ -504,7 +511,10 @@ button {
   color: #fff;
 }
 .profile {
-  margin-top: auto;
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  left: 16px;
   border-top: 1px solid #32404a;
   padding: 19px 7px 0;
   display: flex;
@@ -516,6 +526,13 @@ button {
   display: grid;
   gap: 2px;
   flex: 1;
+  min-width: 0;
+}
+.profile strong,
+.profile small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .profile small {
   color: #91a1aa;
@@ -1375,6 +1392,16 @@ p {
   .profile {
     justify-content: center;
     padding: 17px 0 0;
+    right: 9px;
+    bottom: 22px;
+    left: 9px;
+  }
+  .sign-out-label {
+    display: none;
+  }
+  .sign-out {
+    width: 32px;
+    padding: 0;
   }
   .workspace {
     margin-left: 74px;
@@ -1783,12 +1810,15 @@ p {
   background: transparent;
   color: #cbd5d8;
   border-radius: 7px;
-  width: 32px;
+  min-width: 32px;
   height: 32px;
   display: grid;
   place-items: center;
-  font-size: 18px;
+  font-size: 13px;
   line-height: 1;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 0 8px;
 }
 .sign-out:hover {
   color: #fff;

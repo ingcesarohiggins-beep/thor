@@ -705,7 +705,15 @@ export default function Home() {
           </label>
           <div>
             <strong>{actor?.name ?? "THOR"}</strong>
-            <small>{actor?.role ?? "Cargando"}</small>
+            <small>
+              {actor?.role === "superadmin"
+                ? "Superadministrador"
+                : actor?.role === "admin"
+                  ? "Administrador general"
+                  : actor?.role === "seller"
+                    ? "Vendedor"
+                    : "Cargando"}
+            </small>
           </div>
           <button
             className="sign-out"
@@ -713,7 +721,8 @@ export default function Home() {
             aria-label="Cerrar sesión"
             title="Cerrar sesión"
           >
-            ↪
+            <span aria-hidden="true">↪</span>
+            <span className="sign-out-label">Salir</span>
           </button>
         </div>
       </aside>
