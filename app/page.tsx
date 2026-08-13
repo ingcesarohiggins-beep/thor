@@ -235,7 +235,7 @@ export default function Home() {
     if (!authData.user) return;
     let user = await supabase
       .from("app_users")
-      .select("id, name, role, location_id, locations(name)")
+      .select("id, name, role, location_id")
       .eq("auth_user_id", authData.user.id)
       .maybeSingle();
     if (!user.data && !user.error) {
@@ -250,7 +250,7 @@ export default function Home() {
       if (boot.error) throw boot.error;
       user = await supabase
         .from("app_users")
-        .select("id, name, role, location_id, locations(name)")
+        .select("id, name, role, location_id")
         .eq("auth_user_id", authData.user.id)
         .single();
     }
@@ -258,19 +258,12 @@ export default function Home() {
       throw (
         user.error ?? new Error("Tu usuario aún no tiene una sede asignada.")
       );
-    const assignedLocation = user.data.locations as unknown as
-      | { name?: string }
-      | { name?: string }[]
-      | null;
-    const locationName = Array.isArray(assignedLocation)
-      ? assignedLocation[0]?.name
-      : assignedLocation?.name;
     const current = {
       id: user.data.id,
       name: user.data.name,
       role: user.data.role,
       locationId: user.data.location_id,
-      locationName: locationName ?? "Sede asignada",
+      locationName: "Sede asignada",
       avatarPath: null,
     };
     setActor(current);
@@ -395,8 +388,8 @@ export default function Home() {
       void refresh().catch((error) =>
         setNotice(
           error instanceof Error
-            ? error.message
-            : "Ejecuta las migraciones de Supabase antes de usar THOR.",
+            ? `No se pudo cargar tu perfil: ${error.message}`
+            : "No se pudo cargar tu perfil ni la sede activa.",
         ),
       );
     }, 0);
@@ -635,6 +628,36 @@ export default function Home() {
     setSection("inicio");
   };
 
+  const openNewRecord = () => {
+    const targetBySection: Partial<Record<Section, string>> = {
+      clientes: "new-customer",
+      proveedores: "new-supplier",
+      usuarios: "new-user",
+    };
+    const target = targetBySection[section];
+    if (!target) {
+      setSection("ventas");
+      setSalesView("new");
+      return;
+    }
+    document.getElementById(target)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    window.setTimeout(() => {
+      document.querySelector<HTMLElement>(`#${target} input`)?.focus();
+    }, 350);
+  };
+
+  const newRecordLabel =
+    section === "clientes"
+      ? "Nuevo cliente"
+      : section === "proveedores"
+        ? "Nuevo proveedor"
+        : section === "usuarios"
+          ? "Nuevo usuario"
+          : "Nueva venta";
+
   const items = useMemo(
     () =>
       stock.filter((item) =>
@@ -773,8 +796,8 @@ export default function Home() {
                 : section[0].toUpperCase() + section.slice(1)}
             </h1>
           </div>
-          <button className="quick" onClick={() => setSection("ventas")}>
-            ＋ Nueva venta
+          <button className="quick" onClick={openNewRecord}>
+            ＋ {newRecordLabel}
           </button>
         </header>
         <div className="notice" role="status">
@@ -1541,7 +1564,7 @@ function CustomerCenter({
         <div className="users-count"><strong>{customers.length}</strong><span>clientes registrados</span></div>
       </section>
       <div className="directory-grid">
-        <section className="card">
+        <section className="card" id="new-customer">
           <p className="eyebrow">NUEVO CLIENTE</p><h3>Registrar cliente</h3>
           <form className="directory-form" onSubmit={createCustomer}>
             <label>Nombre completo<input name="name" required placeholder="Ej. María Pérez" /></label>
@@ -1604,7 +1627,7 @@ function SupplierCenter({ actor }: { actor: { id: string; name: string; role: st
     <div className="content directory-page">
       <section className="directory-hero"><div><p className="eyebrow">COMPRAS Y ABASTECIMIENTO</p><h2>Proveedores</h2><p>Centraliza RUC, contacto y teléfono de quienes abastecen la operación.</p></div><div className="users-count"><strong>{suppliers.filter((item) => item.active).length}</strong><span>proveedores activos</span></div></section>
       <div className="directory-grid">
-        <section className="card"><p className="eyebrow">NUEVO PROVEEDOR</p><h3>Registrar proveedor</h3>
+        <section className="card" id="new-supplier"><p className="eyebrow">NUEVO PROVEEDOR</p><h3>Registrar proveedor</h3>
           {canManage ? <form className="directory-form" onSubmit={createSupplier}><label>Razón social o nombre<input name="name" required placeholder="Ej. Distribuidora Lima SAC" /></label><div className="two-fields"><label>RUC<input name="ruc" inputMode="numeric" maxLength={16} placeholder="Opcional" /></label><label>Teléfono<input name="phone" placeholder="Opcional" /></label></div><label>Contacto<input name="contact" placeholder="Ej. Luis Torres" /></label><label>Dirección<input name="address" placeholder="Opcional" /></label><button className="primary" disabled={saving}>{saving ? "Guardando..." : "Guardar proveedor"}</button></form> : <p className="empty">El vendedor puede consultar proveedores; el registro es administrativo.</p>}
           {message && <p className="users-message" role="status">{message}</p>}
         </section>
@@ -1786,7 +1809,7 @@ function UserCenter({
         </div>
       </section>
       <div className="users-grid">
-        <section className="card link-card">
+        <section className="card link-card" id="new-user">
           <p className="eyebrow">NUEVO USUARIO</p>
           <h3>Crear acceso desde THOR</h3>
           <p>
