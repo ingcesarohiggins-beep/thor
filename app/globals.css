@@ -151,6 +151,14 @@
   place-items: center;
   font-size: 11px;
   font-weight: bold;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.user-avatar img,
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .users-list article > div,
 .pending-invites article > div {
@@ -522,6 +530,45 @@ button {
   place-items: center;
   font-size: 10px;
   font-weight: bold;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.avatar-upload {
+  cursor: pointer;
+  position: relative;
+}
+.avatar-upload::after {
+  content: "Cambiar";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #15232acc;
+  color: #fff;
+  font-size: 7px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.avatar-upload:hover::after,
+.avatar-upload:focus-within::after {
+  opacity: 1;
+}
+.avatar-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.idle-warning {
+  margin: 14px 32px -3px;
+  padding: 11px 15px;
+  border: 1px solid #e2ba68;
+  border-radius: 9px;
+  background: #fff8e8;
+  color: #795914;
+  font-size: 13px;
+  line-height: 1.4;
 }
 .workspace {
   margin-left: 248px;

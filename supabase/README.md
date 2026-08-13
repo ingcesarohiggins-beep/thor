@@ -29,6 +29,12 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 4. Antes de confirmar una venta, cada persona debe abrir su propia caja y registrar su fondo inicial. THOR bloquea la venta en la pantalla y en la base de datos hasta que exista una caja abierta.
 5. Al terminar el turno, registra el efectivo contado y cierra la caja. Solo el Superadministrador puede cambiar roles o privilegios de usuarios.
 
+## Seguridad y foto de perfil
+
+1. Ejecuta `migrations/202608130009_user_avatars.sql` después de las demás migraciones.
+2. Cada sesión se cierra automáticamente después de 15 minutos sin actividad; THOR muestra un aviso a los 13 minutos.
+3. Cada usuario puede hacer clic en sus iniciales, al pie del menú lateral, para cargar o reemplazar su foto de perfil. La imagen queda privada en el bucket `thor-files`.
+
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.

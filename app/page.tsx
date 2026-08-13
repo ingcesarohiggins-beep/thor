@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Login, SetupNeeded } from "./login";
 import { getSupabaseBrowser } from "./lib/supabase-browser";
 import {
@@ -88,6 +88,7 @@ type ManagedUser = {
   email: string | null;
   role: UserRole;
   active: boolean;
+  avatar_path: string | null;
   locations: { name: string }[];
 };
 type LocationOption = { id: string; name: string };
@@ -117,6 +118,8 @@ export default function Home() {
   const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
   const [salesView, setSalesView] = useState<"new" | "history">("new");
   const [cashOpen, setCashOpen] = useState(false);
+  const [idleWarning, setIdleWarning] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [activeLocationId, setActiveLocationId] = useState<string | null>(null);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
@@ -131,6 +134,7 @@ export default function Home() {
     name: string;
     role: string;
     locationId: string;
+    avatarPath: string | null;
   } | null>(null);
   const supabase = getSupabaseBrowser();
   const operationLocationId =
@@ -152,13 +156,62 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
+  useEffect(() => {
+    if (!supabase || !token) return;
+    const idleMs = 15 * 60 * 1000;
+    const warningMs = 13 * 60 * 1000;
+    let warningTimer: number | undefined;
+    let signOutTimer: number | undefined;
+    const resetIdleTimer = () => {
+      if (warningTimer) window.clearTimeout(warningTimer);
+      if (signOutTimer) window.clearTimeout(signOutTimer);
+      setIdleWarning(false);
+      warningTimer = window.setTimeout(() => setIdleWarning(true), warningMs);
+      signOutTimer = window.setTimeout(() => {
+        void supabase.auth.signOut().then(() => {
+          setToken(null);
+          setIdleWarning(false);
+          setNotice("La sesión se cerró tras 15 minutos sin actividad.");
+        });
+      }, idleMs);
+    };
+    const events: Array<keyof WindowEventMap> = [
+      "pointerdown",
+      "keydown",
+      "scroll",
+      "touchstart",
+      "focus",
+    ];
+    events.forEach((event) => window.addEventListener(event, resetIdleTimer));
+    resetIdleTimer();
+    return () => {
+      events.forEach((event) => window.removeEventListener(event, resetIdleTimer));
+      if (warningTimer) window.clearTimeout(warningTimer);
+      if (signOutTimer) window.clearTimeout(signOutTimer);
+    };
+  }, [supabase, token]);
+
+  useEffect(() => {
+    if (!supabase || !actor?.avatarPath) return;
+    let active = true;
+    void supabase.storage
+      .from("thor-files")
+      .createSignedUrl(actor.avatarPath, 60 * 60)
+      .then(({ data }) => {
+        if (active) setAvatarUrl(data?.signedUrl ?? null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [actor?.avatarPath, supabase]);
+
   const refresh = async (requestedLocationId?: string) => {
     if (!supabase || !token) return;
     const { data: authData } = await supabase.auth.getUser(token);
     if (!authData.user) return;
     let user = await supabase
       .from("app_users")
-      .select("id, name, role, location_id")
+      .select("id, name, role, location_id, avatar_path")
       .eq("auth_user_id", authData.user.id)
       .maybeSingle();
     if (!user.data && !user.error) {
@@ -173,7 +226,7 @@ export default function Home() {
       if (boot.error) throw boot.error;
       user = await supabase
         .from("app_users")
-        .select("id, name, role, location_id")
+        .select("id, name, role, location_id, avatar_path")
         .eq("auth_user_id", authData.user.id)
         .single();
     }
@@ -186,6 +239,7 @@ export default function Home() {
       name: user.data.name,
       role: user.data.role,
       locationId: user.data.location_id,
+      avatarPath: user.data.avatar_path,
     };
     setActor(current);
     const locationId =
@@ -333,6 +387,45 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(loadTimer);
   }, [actor, supabase]);
+
+  const uploadAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
+    const image = event.target.files?.[0];
+    if (!image || !supabase || !actor) return;
+    if (!image.type.startsWith("image/")) {
+      setNotice("Selecciona una imagen para la foto de perfil.");
+      return;
+    }
+    if (image.size > 5 * 1024 * 1024) {
+      setNotice("La foto de perfil debe pesar como máximo 5 MB.");
+      return;
+    }
+    try {
+      const extension = image.type.split("/")[1] || "jpg";
+      const path = `avatars/${actor.id}/${crypto.randomUUID()}.${extension}`;
+      const upload = await supabase.storage
+        .from("thor-files")
+        .upload(path, image, { contentType: image.type });
+      if (upload.error) throw upload.error;
+      const update = await supabase.rpc("update_my_avatar", {
+        p_avatar_path: path,
+      });
+      if (update.error) throw update.error;
+      const signed = await supabase.storage
+        .from("thor-files")
+        .createSignedUrl(path, 60 * 60);
+      if (signed.error) throw signed.error;
+      setActor({ ...actor, avatarPath: path });
+      setAvatarUrl(signed.data.signedUrl);
+      setNotice("Foto de perfil actualizada.");
+      event.target.value = "";
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar la foto de perfil.",
+      );
+    }
+  };
 
   const addToCart = (item: StockItem) => {
     setCart((current) => {
@@ -602,9 +695,14 @@ export default function Home() {
             ))}
         </nav>
         <div className="profile">
-          <span className="avatar">
-            {actor?.name.slice(0, 2).toUpperCase() ?? "TH"}
-          </span>
+          <label className="avatar avatar-upload" title="Cambiar foto de perfil">
+            {actor?.avatarPath && avatarUrl ? (
+              <img src={avatarUrl} alt={`Foto de ${actor?.name ?? "usuario"}`} />
+            ) : (
+              actor?.name.slice(0, 2).toUpperCase() ?? "TH"
+            )}
+            <input type="file" accept="image/*" onChange={uploadAvatar} aria-label="Cambiar foto de perfil" />
+          </label>
           <div>
             <strong>{actor?.name ?? "THOR"}</strong>
             <small>{actor?.role ?? "Cargando"}</small>
@@ -620,6 +718,11 @@ export default function Home() {
         </div>
       </aside>
       <section className="workspace">
+        {idleWarning && (
+          <div className="idle-warning" role="status">
+            Por seguridad, tu sesión se cerrará pronto por inactividad. Realiza una acción para continuar.
+          </div>
+        )}
         <header className="topbar">
           <div>
             <p className="eyebrow">THOR · PERÚ</p>
@@ -1565,7 +1668,7 @@ function UserCenter({
     const [userResult, locationResult] = await Promise.all([
       supabase
         .from("app_users")
-        .select("id, name, email, role, active, locations(name)")
+        .select("id, name, email, role, active, avatar_path, locations(name)")
         .order("created_at", { ascending: true }),
       supabase.from("locations").select("id, name").eq("active", true),
     ]);
@@ -1748,9 +1851,7 @@ function UserCenter({
           <div className="users-list">
             {users.map((user) => (
               <article key={user.id}>
-                <span className="user-avatar">
-                  {user.name.slice(0, 2).toUpperCase()}
-                </span>
+                <UserAvatar user={user} />
                 <div>
                   <strong>{user.name}</strong>
                   <small>
@@ -1794,6 +1895,29 @@ function UserCenter({
         )}
       </section>
     </div>
+  );
+}
+
+function UserAvatar({ user }: { user: ManagedUser }) {
+  const supabase = getSupabaseBrowser();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!supabase || !user.avatar_path) return;
+    let active = true;
+    void supabase.storage
+      .from("thor-files")
+      .createSignedUrl(user.avatar_path, 60 * 60)
+      .then(({ data }) => {
+        if (active) setUrl(data?.signedUrl ?? null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [supabase, user.avatar_path]);
+  return (
+    <span className="user-avatar">
+      {user.avatar_path && url ? <img src={url} alt={`Foto de ${user.name}`} /> : user.name.slice(0, 2).toUpperCase()}
+    </span>
   );
 }
 
