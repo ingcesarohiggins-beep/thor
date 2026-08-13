@@ -134,6 +134,7 @@ export default function Home() {
     name: string;
     role: string;
     locationId: string;
+    locationName: string;
     avatarPath: string | null;
   } | null>(null);
   const supabase = getSupabaseBrowser();
@@ -143,6 +144,7 @@ export default function Home() {
       : activeLocationId ?? actor?.locationId ?? "";
   const operationLocationName =
     locations.find((location) => location.id === operationLocationId)?.name ??
+    actor?.locationName ??
     "Sede asignada";
 
   useEffect(() => {
@@ -205,13 +207,35 @@ export default function Home() {
     };
   }, [actor?.avatarPath, supabase]);
 
+  useEffect(() => {
+    const actorId = actor?.id;
+    if (!supabase || !actorId) return;
+    let active = true;
+    void supabase
+      .from("app_users")
+      .select("avatar_path")
+      .eq("id", actorId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active || error || !data?.avatar_path) return;
+        setActor((current) =>
+          current?.id === actorId
+            ? { ...current, avatarPath: data.avatar_path }
+            : current,
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [actor?.id, supabase]);
+
   const refresh = async (requestedLocationId?: string) => {
     if (!supabase || !token) return;
     const { data: authData } = await supabase.auth.getUser(token);
     if (!authData.user) return;
     let user = await supabase
       .from("app_users")
-      .select("id, name, role, location_id, avatar_path")
+      .select("id, name, role, location_id, locations(name)")
       .eq("auth_user_id", authData.user.id)
       .maybeSingle();
     if (!user.data && !user.error) {
@@ -226,7 +250,7 @@ export default function Home() {
       if (boot.error) throw boot.error;
       user = await supabase
         .from("app_users")
-        .select("id, name, role, location_id, avatar_path")
+        .select("id, name, role, location_id, locations(name)")
         .eq("auth_user_id", authData.user.id)
         .single();
     }
@@ -234,12 +258,20 @@ export default function Home() {
       throw (
         user.error ?? new Error("Tu usuario aún no tiene una sede asignada.")
       );
+    const assignedLocation = user.data.locations as unknown as
+      | { name?: string }
+      | { name?: string }[]
+      | null;
+    const locationName = Array.isArray(assignedLocation)
+      ? assignedLocation[0]?.name
+      : assignedLocation?.name;
     const current = {
       id: user.data.id,
       name: user.data.name,
       role: user.data.role,
       locationId: user.data.location_id,
-      avatarPath: user.data.avatar_path,
+      locationName: locationName ?? "Sede asignada",
+      avatarPath: null,
     };
     setActor(current);
     const locationId =
