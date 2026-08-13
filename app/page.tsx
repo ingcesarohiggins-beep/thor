@@ -47,6 +47,7 @@ type SaleRecord = {
 };
 type CashSession = {
   id: string;
+  opened_by: string;
   opening_cash: number;
   opened_at: string;
   closed_at: string | null;
@@ -89,6 +90,7 @@ type ManagedUser = {
   active: boolean;
   locations: { name: string }[];
 };
+type LocationOption = { id: string; name: string };
 
 const money = new Intl.NumberFormat("es-PE", {
   style: "currency",
@@ -114,6 +116,9 @@ export default function Home() {
   });
   const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
   const [salesView, setSalesView] = useState<"new" | "history">("new");
+  const [cashOpen, setCashOpen] = useState(false);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [activeLocationId, setActiveLocationId] = useState<string | null>(null);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<StockItem[]>([]);
@@ -128,6 +133,13 @@ export default function Home() {
     locationId: string;
   } | null>(null);
   const supabase = getSupabaseBrowser();
+  const operationLocationId =
+    actor?.role === "seller"
+      ? actor.locationId
+      : activeLocationId ?? actor?.locationId ?? "";
+  const operationLocationName =
+    locations.find((location) => location.id === operationLocationId)?.name ??
+    "Sede asignada";
 
   useEffect(() => {
     if (!supabase) return;
@@ -140,7 +152,7 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
-  const refresh = async () => {
+  const refresh = async (requestedLocationId?: string) => {
     if (!supabase || !token) return;
     const { data: authData } = await supabase.auth.getUser(token);
     if (!authData.user) return;
@@ -176,41 +188,62 @@ export default function Home() {
       locationId: user.data.location_id,
     };
     setActor(current);
-    const [serials, accessories, prices, sales, expenses, history] =
+    const locationId =
+      current.role === "seller"
+        ? current.locationId
+        : requestedLocationId ?? activeLocationId ?? current.locationId;
+    setActiveLocationId((previous) =>
+      current.role === "seller" ? current.locationId : previous ?? current.locationId,
+    );
+    const locationList = await supabase
+      .from("locations")
+      .select("id, name")
+      .eq("active", true)
+      .order("name");
+    if (locationList.error) throw locationList.error;
+    setLocations((locationList.data ?? []) as LocationOption[]);
+    const [serials, accessories, prices, sales, expenses, history, ownCash] =
       await Promise.all([
       supabase
         .from("inventory_items")
         .select("id, code, product_id, imei_1, serial, products!inner(name)")
-        .eq("location_id", current.locationId)
+        .eq("location_id", locationId)
         .eq("status", "available"),
       supabase
         .from("stock_balances")
         .select("product_id, quantity, average_cost, products!inner(name, sku)")
-        .eq("location_id", current.locationId),
+        .eq("location_id", locationId),
       supabase
         .from("product_prices")
         .select("product_id, price")
-        .eq("location_id", current.locationId)
+        .eq("location_id", locationId)
         .eq("active", true),
       supabase
         .from("sales")
         .select("total")
-        .eq("location_id", current.locationId)
+        .eq("location_id", locationId)
         .eq("status", "completed")
         .gte("created_at", new Date().toISOString().slice(0, 10)),
       supabase
         .from("expenses")
         .select("amount")
-        .eq("location_id", current.locationId)
+        .eq("location_id", locationId)
         .gte("expense_date", new Date().toISOString().slice(0, 10)),
       supabase
         .from("sales")
         .select("id, code, customer_name, total, status, created_at")
-        .eq("location_id", current.locationId)
+        .eq("location_id", locationId)
         .order("created_at", { ascending: false })
         .limit(40),
+      supabase
+        .from("cash_sessions")
+        .select("id")
+        .eq("location_id", locationId)
+        .eq("opened_by", current.id)
+        .is("closed_at", null)
+        .limit(1),
     ]);
-    for (const result of [serials, accessories, prices, sales, expenses, history])
+    for (const result of [serials, accessories, prices, sales, expenses, history, ownCash])
       if (result.error) throw result.error;
     const priceMap = new Map(
       (prices.data ?? []).map((price) => [
@@ -255,6 +288,7 @@ export default function Home() {
         0,
       );
     setSalesHistory((history.data ?? []) as SaleRecord[]);
+    setCashOpen((ownCash.data ?? []).length > 0);
     setMetrics({
       sales: salesTotal,
       expenses: expensesTotal,
@@ -266,7 +300,7 @@ export default function Home() {
       salesCount: (sales.data ?? []).length,
       operational: salesTotal - expensesTotal,
     });
-    setNotice("THOR conectado a Supabase. Almacén Central listo.");
+    setNotice("THOR conectado a Supabase. Operación lista.");
   };
 
   // The delayed refresh reads the current Supabase session after authentication settles.
@@ -380,7 +414,7 @@ export default function Home() {
         .insert({
           code,
           product_id: product.data.id,
-          location_id: actor.locationId,
+          location_id: operationLocationId,
           imei_1: imei,
           cost,
           status: "available",
@@ -393,11 +427,11 @@ export default function Home() {
         .from("product_prices")
         .update({ active: false })
         .eq("product_id", product.data.id)
-        .eq("location_id", actor.locationId)
+        .eq("location_id", operationLocationId)
         .eq("active", true);
       const priceSave = await supabase.from("product_prices").insert({
         product_id: product.data.id,
-        location_id: actor.locationId,
+        location_id: operationLocationId,
         price,
         changed_by: actor.id,
         active: true,
@@ -418,6 +452,11 @@ export default function Home() {
   const completeSale = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !actor || !cart.length) return;
+    if (!cashOpen) {
+      setNotice("Abre tu caja antes de confirmar una venta.");
+      setSection("caja");
+      return;
+    }
     const total = calculateCartTotal(cart);
     if (!paymentsMatchTotal(payments, total))
       return setNotice(
@@ -426,7 +465,7 @@ export default function Home() {
     setSavingSale(true);
     try {
       const { data, error } = await supabase.rpc("complete_sale", {
-        p_location_id: actor.locationId,
+        p_location_id: operationLocationId,
         p_seller_id: actor.id,
         p_customer_name: customer.name,
         p_customer_dni: customer.dni,
@@ -501,7 +540,24 @@ export default function Home() {
           <span>THOR</span>
         </div>
         <p className="location-label">SEDE ACTIVA</p>
-        <button className="location">Almacén Central</button>
+        {actor?.role === "seller" ? (
+          <button className="location" disabled>{operationLocationName}</button>
+        ) : (
+          <select
+            className="location location-selector"
+            value={operationLocationId}
+            onChange={(event) => {
+              const locationId = event.target.value;
+              setActiveLocationId(locationId);
+              void refresh(locationId);
+            }}
+            aria-label="Cambiar sede operativa"
+          >
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>{location.name}</option>
+            ))}
+          </select>
+        )}
         <nav>
           {(
             [
@@ -961,11 +1017,19 @@ export default function Home() {
                   </span>
                   <strong>{money.format(total)}</strong>
                 </div>
+                {!cashOpen && (
+                  <div className="cash-required" role="alert">
+                    <strong>Abre tu caja antes de vender.</strong>
+                    <span>Ve al módulo Caja, registra el fondo inicial y luego confirma la venta.</span>
+                    <button type="button" className="text-button" onClick={() => setSection("caja")}>Abrir caja</button>
+                  </div>
+                )}
                 <button
                   className="primary sale-button"
                   disabled={
                     !cart.length ||
                     savingSale ||
+                    !cashOpen ||
                     !paymentsMatchTotal(payments, total)
                   }
                   type="submit"
@@ -981,7 +1045,11 @@ export default function Home() {
           </div>
         )}
         {section === "caja" && (
-          <CashCenter actor={actor} metrics={metrics} onChanged={refresh} />
+          <CashCenter
+            actor={actor ? { ...actor, locationId: operationLocationId } : null}
+            metrics={metrics}
+            onChanged={refresh}
+          />
         )}
         {section === "clientes" && actor && (
           <CustomerCenter
@@ -1132,7 +1200,7 @@ function CashCenter({
   const load = useCallback(async () => {
     if (!supabase || !actor) return;
     const [sessionResult, expenseResult] = await Promise.all([
-      supabase.from("cash_sessions").select("id, opening_cash, opened_at, closed_at, counted_cash, note").eq("location_id", actor.locationId).order("opened_at", { ascending: false }).limit(8),
+      supabase.from("cash_sessions").select("id, opened_by, opening_cash, opened_at, closed_at, counted_cash, note").eq("location_id", actor.locationId).order("opened_at", { ascending: false }).limit(8),
       supabase.from("expenses").select("id, category, description, amount, payment_method, expense_date").eq("location_id", actor.locationId).order("expense_date", { ascending: false }).limit(8),
     ]);
     if (sessionResult.error || expenseResult.error) {
@@ -1151,8 +1219,10 @@ function CashCenter({
   }, [load]);
 
   if (!actor) return null;
-  const activeSession = sessions.find((session) => !session.closed_at);
-  const canManage = actor.role !== "seller";
+  const activeSession = sessions.find(
+    (session) => !session.closed_at && session.opened_by === actor.id,
+  );
+  const canManageExpenses = actor.role !== "seller";
 
   const saveOpening = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1168,7 +1238,7 @@ function CashCenter({
     setSaving(false);
     if (result.error) return setMessage(result.error.message);
     setMessage("Caja abierta correctamente.");
-    await load();
+    await Promise.all([load(), onChanged()]);
   };
 
   const closeCash = async (event: FormEvent<HTMLFormElement>) => {
@@ -1184,7 +1254,7 @@ function CashCenter({
     setSaving(false);
     if (result.error) return setMessage(result.error.message);
     setMessage("Caja cerrada correctamente.");
-    await load();
+    await Promise.all([load(), onChanged()]);
   };
 
   const registerExpense = async (event: FormEvent<HTMLFormElement>) => {
@@ -1215,7 +1285,7 @@ function CashCenter({
         <div>
           <p className="eyebrow">CAJA DE LA SEDE</p>
           <h2>{activeSession ? "Caja abierta" : "Caja pendiente de apertura"}</h2>
-          <p>{activeSession ? `Abierta el ${new Date(activeSession.opened_at).toLocaleString("es-PE")}.` : "Registra la apertura antes de iniciar la operación."}</p>
+          <p>{activeSession ? `Tu caja está abierta desde ${new Date(activeSession.opened_at).toLocaleString("es-PE")}.` : "Debes abrir tu propia caja antes de registrar una venta."}</p>
         </div>
         <span className={activeSession ? "badge success" : "badge warning"}>{activeSession ? "Activa" : "Sin abrir"}</span>
       </section>
@@ -1228,7 +1298,7 @@ function CashCenter({
       <div className="cash-grid">
         <section className="card">
           <div className="card-head"><div><p className="eyebrow">CONTROL DE SESIÓN</p><h3>{activeSession ? "Cerrar caja" : "Abrir caja"}</h3></div></div>
-          {canManage ? activeSession ? (
+          {activeSession ? (
             <form className="cash-form" onSubmit={closeCash}>
               <label>Efectivo contado<input name="counted_cash" type="number" min="0" step="0.01" required /></label>
               <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Cerrar caja"}</button>
@@ -1239,12 +1309,12 @@ function CashCenter({
               <label>Nota<input name="note" placeholder="Ej. Apertura turno mañana" /></label>
               <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Abrir caja"}</button>
             </form>
-          ) : <p className="empty">El vendedor puede consultar caja; la apertura y cierre son administrativos.</p>}
+          )}
           {message && <p className="users-message" role="status">{message}</p>}
         </section>
         <section className="card">
           <p className="eyebrow">GASTO OPERATIVO</p><h3>Registrar egreso</h3>
-          {canManage ? <form className="cash-form" onSubmit={registerExpense}>
+          {canManageExpenses ? <form className="cash-form" onSubmit={registerExpense}>
             <div className="two-fields"><label>Categoría<input name="category" defaultValue="Operativo" required /></label><label>Monto (S/)<input name="amount" type="number" min="0.01" step="0.01" required /></label></div>
             <label>Descripción<input name="description" required placeholder="Ej. Transporte o embalaje" /></label>
             <div className="two-fields"><label>Método<select name="payment_method"><option>Efectivo</option><option>Yape/Plin</option><option>Transferencia</option></select></label><label>Fecha<input name="expense_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></label></div>
@@ -1451,6 +1521,13 @@ function QuickGuide({
               "Revisa auditoría y actualiza los manuales cuando cambie el sistema.",
             ],
           };
+  if (role === "seller") {
+    guide.steps.unshift("Abre tu caja antes de iniciar ventas; THOR bloqueará la venta si no está abierta.");
+  } else if (role === "admin") {
+    guide.steps.unshift("Selecciona la sede operativa en el menú lateral para gestionar cada almacén.");
+  } else {
+    guide.steps.unshift("Crea administradores y revisa que cada vendedor tenga una sede correctamente asignada.");
+  }
   return (
     <section className="quick-guide" aria-labelledby="quick-guide-title">
       <div>
@@ -1571,7 +1648,7 @@ function UserCenter({
           <p>
             {actor.role === "superadmin"
               ? "Puedes crear vendedores y administradores."
-              : "Puedes crear cuentas de vendedor para tu sede."}
+              : "Puedes crear vendedores y asignarlos a cualquier sede."}
           </p>
           <form onSubmit={createUser} className="invite-form">
             <label>
@@ -1611,7 +1688,7 @@ function UserCenter({
               </label>
               <label>
                 Sede
-                {actor.role === "superadmin" ? (
+                {actor.role !== "seller" ? (
                   <select name="location_id" defaultValue={actor.locationId}>
                     {locations.map((location) => (
                       <option key={location.id} value={location.id}>
@@ -1654,8 +1731,8 @@ function UserCenter({
             <li>La persona ingresa con las credenciales que le entregues.</li>
           </ol>
           <p>
-            El Superadmin es el unico que puede crear o asignar el rol de
-            Administrador.
+            El Superusuario crea administradores. El Administrador general
+            puede crear vendedores para cualquier almacén, pero no eleva roles.
           </p>
         </section>
       </div>
@@ -1784,6 +1861,46 @@ function ManualCenter({
       "Vigente",
     ],
   ];
+  modules.splice(2, 1, [
+    "Caja",
+    "Cada usuario abre y cierra su propia caja; sin una sesión abierta no se puede confirmar una venta.",
+    "Activo",
+  ]);
+  modules.push(
+    [
+      "Clientes",
+      "Registra clientes con DNI, contacto y dirección o usa Cliente General para ventas rápidas.",
+      "Activo",
+    ],
+    [
+      "Proveedores",
+      "Conserva RUC, contacto y datos de abastecimiento para las compras y entradas de inventario.",
+      "Activo",
+    ],
+    [
+      "Usuarios y sedes",
+      "El superadministrador crea administradores; los administradores crean vendedores para cada almacén.",
+      "Activo",
+    ],
+  );
+  const benefits =
+    role === "seller"
+      ? [
+          "Trabajas solo en el almacén que te fue asignado.",
+          "La caja propia protege tus ventas y permite un cierre claro por turno.",
+          "El sistema descuenta el stock al confirmar un pago completo.",
+        ]
+      : role === "admin"
+        ? [
+            "Puedes cambiar la sede operativa desde el menú lateral y revisar cada almacén.",
+            "Puedes crear vendedores para cualquier sede, controlar inventario, ventas, caja y gastos.",
+            "No puedes crear administradores ni cambiar privilegios de usuarios.",
+          ]
+        : [
+            "Controlas usuarios, roles y la operación completa de todas las sedes.",
+            "Puedes crear administradores y vendedores con su almacén asignado.",
+            "Eres responsable de mantener los permisos y manuales actualizados.",
+          ];
   return (
     <div className="content manuals-page">
       <section className="manuals-hero">
@@ -1797,8 +1914,8 @@ function ManualCenter({
         </div>
         <div className="manual-version">
           <span>Manual general</span>
-          <strong>Versión 1.0</strong>
-          <small>Actualizado: 6 ago. 2026</small>
+          <strong>Versión 1.1</strong>
+          <small>Actualizado: 13 ago. 2026</small>
         </div>
       </section>
       <section className="manual-role">
@@ -1819,6 +1936,11 @@ function ManualCenter({
             <p>{step}</p>
           </article>
         ))}
+      </section>
+      <section className="manual-benefits">
+        <p className="eyebrow">BENEFICIOS Y CONTROLES</p>
+        <h3>Lo que este acceso te permite hacer</h3>
+        <ul>{benefits.map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>
       </section>
       <section className="manuals-section">
         <div className="section-heading">

@@ -21,6 +21,14 @@ No publiques `SUPABASE_SERVICE_ROLE_KEY`: esa clave permite administrar toda la 
 
 La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las variables publicas de THOR.
 
+## Almacenes, vendedores y caja
+
+1. Ejecuta tambien `migrations/202608130007_customers.sql` y `migrations/202608130008_cash_required_for_sales.sql` en el SQL Editor, en ese orden.
+2. El Superadministrador crea administradores y vendedores. El Administrador puede crear vendedores y asignarlos a cualquier almacén activo.
+3. Cada vendedor trabaja en el almacén asignado. El Administrador puede seleccionar el almacén que administra desde el menú lateral.
+4. Antes de confirmar una venta, cada persona debe abrir su propia caja y registrar su fondo inicial. THOR bloquea la venta en la pantalla y en la base de datos hasta que exista una caja abierta.
+5. Al terminar el turno, registra el efectivo contado y cierra la caja. Solo el Superadministrador puede cambiar roles o privilegios de usuarios.
+
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.

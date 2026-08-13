@@ -31,10 +31,17 @@ Deno.serve(async (request) => {
     const email = String(body.email ?? "").trim().toLowerCase();
     const password = String(body.password ?? "");
     const requestedRole = String(body.role ?? "seller");
-    const locationId = caller.role === "superadmin" ? String(body.locationId ?? caller.location_id) : caller.location_id;
+    const locationId = String(body.locationId ?? caller.location_id);
     if (!name || !email || password.length < 8) throw new Error("Completa nombre, correo y una contrasena de al menos 8 caracteres.");
     if (!['seller', 'admin'].includes(requestedRole)) throw new Error("Rol invalido.");
     if (caller.role !== "superadmin" && requestedRole !== "seller") throw new Error("Un administrador solo puede crear vendedores.");
+    const { data: location, error: locationError } = await adminClient
+      .from("locations")
+      .select("id")
+      .eq("id", locationId)
+      .eq("active", true)
+      .maybeSingle();
+    if (locationError || !location) throw new Error("La sede seleccionada no está disponible.");
 
     const { data: created, error: createError } = await adminClient.auth.admin.createUser({
       email,
