@@ -884,6 +884,110 @@ p {
   grid-template-columns: 1fr 365px;
   min-height: calc(100vh - 156px);
 }
+.sale-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+.sale-section-head h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+}
+.view-switch {
+  display: flex;
+  background: #eef1ef;
+  border-radius: 8px;
+  padding: 3px;
+}
+.view-switch button {
+  border: 0;
+  background: transparent;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 6px;
+}
+.view-switch button.selected {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 4px #1325301c;
+}
+.sales-history-card {
+  margin-top: 18px;
+  padding: 0 20px;
+}
+.dashboard-sales {
+  margin-bottom: 22px;
+}
+.sales-list article,
+.cash-list article {
+  display: grid;
+  grid-template-columns: 35px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.sales-list article:last-child,
+.cash-list article:last-child {
+  border-bottom: 0;
+}
+.sales-list article > div,
+.cash-list article > div {
+  display: grid;
+  gap: 4px;
+}
+.sales-list small,
+.cash-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.sales-list b,
+.cash-list b {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cash-page .metrics {
+  margin-top: 22px;
+}
+.cash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 17px;
+  margin-bottom: 17px;
+}
+.cash-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 17px;
+}
+.cash-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: bold;
+}
+.cash-form input,
+.cash-form select {
+  border: 1px solid #dce0dc;
+  border-radius: 7px;
+  padding: 10px;
+  color: var(--ink);
+  background: #fff;
+}
+.cash-list {
+  margin-top: 10px;
+}
+.cash-list article {
+  grid-template-columns: 1fr auto;
+}
+.cash-session-values {
+  text-align: right;
+}
 .catalog {
   padding: 26px 32px 35px 42px;
 }
@@ -1157,6 +1261,9 @@ p {
   .catalog {
     padding-left: 26px;
   }
+  .cash-grid {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 650px) {
   .thor-app {
@@ -1277,6 +1384,16 @@ p {
   }
   .catalog {
     padding: 17px 15px;
+  }
+  .sale-section-head {
+    align-items: start;
+    flex-direction: column;
+  }
+  .sales-list article {
+    grid-template-columns: 30px 1fr auto;
+  }
+  .sales-list article .badge {
+    display: none;
   }
   .sale-products {
     grid-template-columns: 1fr 1fr;

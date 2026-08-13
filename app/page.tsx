@@ -32,6 +32,32 @@ type Metrics = {
   expenses: number;
   value: number;
   count: number;
+  salesCount: number;
+  operational: number;
+};
+type SaleRecord = {
+  id: string;
+  code: string;
+  customer_name: string;
+  total: number;
+  status: string;
+  created_at: string;
+};
+type CashSession = {
+  id: string;
+  opening_cash: number;
+  opened_at: string;
+  closed_at: string | null;
+  counted_cash: number | null;
+  note: string | null;
+};
+type ExpenseRecord = {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+  payment_method: string;
+  expense_date: string;
 };
 type UserRole = "superadmin" | "admin" | "seller";
 type Payment = { method: string; amount: number | "" };
@@ -64,7 +90,11 @@ export default function Home() {
     expenses: 0,
     value: 0,
     count: 0,
+    salesCount: 0,
+    operational: 0,
   });
+  const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
+  const [salesView, setSalesView] = useState<"new" | "history">("new");
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<StockItem[]>([]);
   const [customer, setCustomer] = useState<Customer>(emptyCustomer);
@@ -126,7 +156,8 @@ export default function Home() {
       locationId: user.data.location_id,
     };
     setActor(current);
-    const [serials, accessories, prices, sales, expenses] = await Promise.all([
+    const [serials, accessories, prices, sales, expenses, history] =
+      await Promise.all([
       supabase
         .from("inventory_items")
         .select("id, code, product_id, imei_1, serial, products!inner(name)")
@@ -152,8 +183,14 @@ export default function Home() {
         .select("amount")
         .eq("location_id", current.locationId)
         .gte("expense_date", new Date().toISOString().slice(0, 10)),
+      supabase
+        .from("sales")
+        .select("id, code, customer_name, total, status, created_at")
+        .eq("location_id", current.locationId)
+        .order("created_at", { ascending: false })
+        .limit(40),
     ]);
-    for (const result of [serials, accessories, prices, sales, expenses])
+    for (const result of [serials, accessories, prices, sales, expenses, history])
       if (result.error) throw result.error;
     const priceMap = new Map(
       (prices.data ?? []).map((price) => [
@@ -189,20 +226,25 @@ export default function Home() {
       })),
     ];
     setStock(rows);
-    setMetrics({
-      sales: (sales.data ?? []).reduce(
+    const salesTotal = (sales.data ?? []).reduce(
         (sum, item) => sum + Number(item.total),
         0,
-      ),
-      expenses: (expenses.data ?? []).reduce(
+      );
+    const expensesTotal = (expenses.data ?? []).reduce(
         (sum, item) => sum + Number(item.amount),
         0,
-      ),
+      );
+    setSalesHistory((history.data ?? []) as SaleRecord[]);
+    setMetrics({
+      sales: salesTotal,
+      expenses: expensesTotal,
       value: (accessories.data ?? []).reduce(
         (sum, item) => sum + Number(item.quantity) * Number(item.average_cost),
         0,
       ),
       count: rows.reduce((sum, item) => sum + item.availableQty, 0),
+      salesCount: (sales.data ?? []).length,
+      operational: salesTotal - expensesTotal,
     });
     setNotice("THOR conectado a Supabase. Almacén Central listo.");
   };
@@ -529,7 +571,24 @@ export default function Home() {
                 value={money.format(metrics.value)}
                 note={`${metrics.count} unidades disponibles`}
               />
+              <Metric
+                label="Resultado operativo"
+                value={money.format(metrics.operational)}
+                note="Ventas menos gastos de hoy"
+              />
             </div>
+            <section className="card dashboard-sales">
+              <div className="card-head">
+                <div>
+                  <p className="eyebrow">MOVIMIENTO RECIENTE</p>
+                  <h3>Últimas ventas</h3>
+                </div>
+                <button className="text-button" onClick={() => setSection("ventas")}>
+                  Ver ventas
+                </button>
+              </div>
+              <SalesList sales={salesHistory.slice(0, 5)} compact />
+            </section>
             <QuickGuide
               role={actor?.role as UserRole | undefined}
               onOpenInventory={() => setSection("inventario")}
@@ -582,6 +641,7 @@ export default function Home() {
                       className="row-action"
                       onClick={() => {
                         addToCart(item);
+                        setSalesView("new");
                         setSection("ventas");
                       }}
                     >
@@ -600,28 +660,38 @@ export default function Home() {
         {section === "ventas" && (
           <div className="sale-layout">
             <section className="catalog">
-              <label className="search">
-                ⌕
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Buscar producto"
-                />
-              </label>
-              <div className="sale-products">
-                {items.map((item) => (
-                  <button
-                    className="sale-product"
-                    key={item.id}
-                    onClick={() => addToCart(item)}
-                  >
-                    <strong>{item.name}</strong>
-                    <small>
-                      {money.format(item.price)} · {item.availableQty} disp.
-                    </small>
-                  </button>
-                ))}
+              <div className="sale-section-head">
+                <div>
+                  <p className="eyebrow">OPERACIÓN COMERCIAL</p>
+                  <h2>{salesView === "new" ? "Nueva venta" : "Historial de ventas"}</h2>
+                </div>
+                <div className="view-switch" role="tablist" aria-label="Vista de ventas">
+                  <button className={salesView === "new" ? "selected" : ""} onClick={() => setSalesView("new")}>Nueva venta</button>
+                  <button className={salesView === "history" ? "selected" : ""} onClick={() => setSalesView("history")}>Historial</button>
+                </div>
               </div>
+              {salesView === "new" ? (
+                <>
+                  <label className="search">
+                    ⌕
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Buscar producto"
+                    />
+                  </label>
+                  <div className="sale-products">
+                    {items.map((item) => (
+                      <button className="sale-product" key={item.id} onClick={() => addToCart(item)}>
+                        <strong>{item.name}</strong>
+                        <small>{money.format(item.price)} · {item.availableQty} disp.</small>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <section className="card sales-history-card"><SalesList sales={salesHistory} /></section>
+              )}
             </section>
             <aside className="cart">
               <form onSubmit={completeSale}>
@@ -826,24 +896,7 @@ export default function Home() {
           </div>
         )}
         {section === "caja" && (
-          <div className="content">
-            <section className="card">
-              <p className="eyebrow">CAJA DE ALMACÉN CENTRAL</p>
-              <h2>Resumen diario</h2>
-              <div className="metrics">
-                <Metric
-                  label="Ventas"
-                  value={money.format(metrics.sales)}
-                  note="Hoy"
-                />
-                <Metric
-                  label="Gastos"
-                  value={money.format(metrics.expenses)}
-                  note="Hoy"
-                />
-              </div>
-            </section>
-          </div>
+          <CashCenter actor={actor} metrics={metrics} onChanged={refresh} />
         )}
         {section === "usuarios" && actor && <UserCenter actor={actor} />}
         {section === "manuales" && (
@@ -942,6 +995,182 @@ function Metric({
       <small>{note}</small>
     </section>
   );
+}
+
+function SalesList({ sales, compact = false }: { sales: SaleRecord[]; compact?: boolean }) {
+  if (!sales.length)
+    return <p className="empty">Aún no hay ventas confirmadas en esta sede.</p>;
+  return (
+    <div className={compact ? "sales-list compact" : "sales-list"}>
+      {sales.map((sale) => (
+        <article key={sale.id}>
+          <span className="movement-icon green">✓</span>
+          <div>
+            <strong>{sale.code}</strong>
+            <small>{sale.customer_name || "Cliente General"} · {new Date(sale.created_at).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}</small>
+          </div>
+          <span className="badge success">Confirmada</span>
+          <b>{money.format(Number(sale.total))}</b>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function CashCenter({
+  actor,
+  metrics,
+  onChanged,
+}: {
+  actor: { id: string; name: string; role: string; locationId: string } | null;
+  metrics: Metrics;
+  onChanged: () => Promise<void>;
+}) {
+  const supabase = getSupabaseBrowser();
+  const [sessions, setSessions] = useState<CashSession[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!supabase || !actor) return;
+    const [sessionResult, expenseResult] = await Promise.all([
+      supabase.from("cash_sessions").select("id, opening_cash, opened_at, closed_at, counted_cash, note").eq("location_id", actor.locationId).order("opened_at", { ascending: false }).limit(8),
+      supabase.from("expenses").select("id, category, description, amount, payment_method, expense_date").eq("location_id", actor.locationId).order("expense_date", { ascending: false }).limit(8),
+    ]);
+    if (sessionResult.error || expenseResult.error) {
+      setMessage("No se pudo cargar el detalle de caja.");
+      return;
+    }
+    setSessions((sessionResult.data ?? []) as CashSession[]);
+    setExpenses((expenseResult.data ?? []) as ExpenseRecord[]);
+  }, [actor, supabase]);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(loadTimer);
+  }, [load]);
+
+  if (!actor) return null;
+  const activeSession = sessions.find((session) => !session.closed_at);
+  const canManage = actor.role !== "seller";
+
+  const saveOpening = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    const result = await supabase.from("cash_sessions").insert({
+      location_id: actor.locationId,
+      opened_by: actor.id,
+      opening_cash: Number(form.get("opening_cash") ?? 0),
+      note: String(form.get("note") ?? "").trim() || null,
+    });
+    setSaving(false);
+    if (result.error) return setMessage(result.error.message);
+    setMessage("Caja abierta correctamente.");
+    await load();
+  };
+
+  const closeCash = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !activeSession) return;
+    const counted = Number(new FormData(event.currentTarget).get("counted_cash") ?? 0);
+    setSaving(true);
+    const result = await supabase.from("cash_sessions").update({
+      closed_at: new Date().toISOString(),
+      counted_cash: counted,
+      approved_by: actor.id,
+    }).eq("id", activeSession.id);
+    setSaving(false);
+    if (result.error) return setMessage(result.error.message);
+    setMessage("Caja cerrada correctamente.");
+    await load();
+  };
+
+  const registerExpense = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    const result = await supabase.from("expenses").insert({
+      cash_session_id: activeSession?.id ?? null,
+      location_id: actor.locationId,
+      recorded_by: actor.id,
+      category: String(form.get("category") ?? "Operativo"),
+      description: String(form.get("description") ?? "").trim(),
+      amount: Number(form.get("amount") ?? 0),
+      payment_method: String(form.get("payment_method") ?? "Efectivo"),
+      expense_date: String(form.get("expense_date") ?? new Date().toISOString().slice(0, 10)),
+    });
+    setSaving(false);
+    if (result.error) return setMessage(result.error.message);
+    event.currentTarget.reset();
+    setMessage("Gasto registrado correctamente.");
+    await Promise.all([load(), onChanged()]);
+  };
+
+  return (
+    <div className="content cash-page">
+      <section className="cash-banner">
+        <div>
+          <p className="eyebrow">CAJA DE LA SEDE</p>
+          <h2>{activeSession ? "Caja abierta" : "Caja pendiente de apertura"}</h2>
+          <p>{activeSession ? `Abierta el ${new Date(activeSession.opened_at).toLocaleString("es-PE")}.` : "Registra la apertura antes de iniciar la operación."}</p>
+        </div>
+        <span className={activeSession ? "badge success" : "badge warning"}>{activeSession ? "Activa" : "Sin abrir"}</span>
+      </section>
+      <div className="metrics">
+        <Metric label="Ventas del día" value={money.format(metrics.sales)} note={`${metrics.salesCount} confirmadas`} />
+        <Metric label="Gastos del día" value={money.format(metrics.expenses)} note="Egresos registrados" />
+        <Metric label="Resultado operativo" value={money.format(metrics.operational)} note="Antes del arqueo" />
+        <Metric label="Fondo inicial" value={money.format(Number(activeSession?.opening_cash ?? 0))} note={activeSession ? "Caja activa" : "Sin sesión"} />
+      </div>
+      <div className="cash-grid">
+        <section className="card">
+          <div className="card-head"><div><p className="eyebrow">CONTROL DE SESIÓN</p><h3>{activeSession ? "Cerrar caja" : "Abrir caja"}</h3></div></div>
+          {canManage ? activeSession ? (
+            <form className="cash-form" onSubmit={closeCash}>
+              <label>Efectivo contado<input name="counted_cash" type="number" min="0" step="0.01" required /></label>
+              <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Cerrar caja"}</button>
+            </form>
+          ) : (
+            <form className="cash-form" onSubmit={saveOpening}>
+              <label>Fondo inicial (S/)<input name="opening_cash" type="number" min="0" step="0.01" required /></label>
+              <label>Nota<input name="note" placeholder="Ej. Apertura turno mañana" /></label>
+              <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Abrir caja"}</button>
+            </form>
+          ) : <p className="empty">El vendedor puede consultar caja; la apertura y cierre son administrativos.</p>}
+          {message && <p className="users-message" role="status">{message}</p>}
+        </section>
+        <section className="card">
+          <p className="eyebrow">GASTO OPERATIVO</p><h3>Registrar egreso</h3>
+          {canManage ? <form className="cash-form" onSubmit={registerExpense}>
+            <div className="two-fields"><label>Categoría<input name="category" defaultValue="Operativo" required /></label><label>Monto (S/)<input name="amount" type="number" min="0.01" step="0.01" required /></label></div>
+            <label>Descripción<input name="description" required placeholder="Ej. Transporte o embalaje" /></label>
+            <div className="two-fields"><label>Método<select name="payment_method"><option>Efectivo</option><option>Yape/Plin</option><option>Transferencia</option></select></label><label>Fecha<input name="expense_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></label></div>
+            <button className="secondary" disabled={saving}>Registrar gasto</button>
+          </form> : <p className="empty">Los gastos los registra un administrador.</p>}
+        </section>
+      </div>
+      <div className="cash-grid">
+        <section className="card"><p className="eyebrow">ÚLTIMOS EGRESOS</p><h3>Gastos registrados</h3><ExpenseList expenses={expenses} /></section>
+        <section className="card"><p className="eyebrow">HISTORIAL DE CAJA</p><h3>Sesiones recientes</h3><CashSessionList sessions={sessions} /></section>
+      </div>
+    </div>
+  );
+}
+
+function ExpenseList({ expenses }: { expenses: ExpenseRecord[] }) {
+  if (!expenses.length) return <p className="empty">Aún no hay gastos registrados.</p>;
+  return <div className="cash-list">{expenses.map((expense) => <article key={expense.id}><div><strong>{expense.description}</strong><small>{expense.category} · {expense.expense_date} · {expense.payment_method}</small></div><b>- {money.format(Number(expense.amount))}</b></article>)}</div>;
+}
+
+function CashSessionList({ sessions }: { sessions: CashSession[] }) {
+  if (!sessions.length) return <p className="empty">Aún no hay sesiones de caja.</p>;
+  return <div className="cash-list">{sessions.map((session) => <article key={session.id}><div><strong>{session.closed_at ? "Caja cerrada" : "Caja abierta"}</strong><small>{new Date(session.opened_at).toLocaleString("es-PE")}</small></div><div className="cash-session-values"><b>Inicio {money.format(Number(session.opening_cash))}</b>{session.closed_at && <small>Arqueo {money.format(Number(session.counted_cash ?? 0))}</small>}</div></article>)}</div>;
 }
 
 function QuickGuide({
