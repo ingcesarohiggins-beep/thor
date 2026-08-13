@@ -56,6 +56,13 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 4. Al confirmar se registra una sola vez el stock, el pago inmediato de la factura y el gasto de flete. No existe crÃ©dito a proveedores.
 5. Efectivo central requiere tener activa la sede **AlmacÃ©n Central** y una caja abierta; el efectivo de una sede solo descuenta su propia caja. Transferencia y Yape/Plin se registran como salida de tesorerÃ­a sin afectar el efectivo de caja.
 
+## Catálogo antes de inventario
+
+1. Ejecuta `migrations/202608130013_product_catalog_and_scanner.sql` después de la migración 012.
+2. Ya no se ingresan equipos directamente desde **Inventario**. Primero se crea la referencia en **Catálogo** (marca, modelo y capacidad o potencia); después se selecciona en **Compras** y se agrega al lote.
+3. El catálogo incluye iPhone 14 en adelante, Galaxy S24 en adelante y cargadores USB-C por potencia. Si llega un modelo que no está en la lista, el Administrador o Superadministrador crea primero ese modelo y sus variantes.
+4. Para equipos serializados, **Compras** permite escanear el código de barras del IMEI desde la cámara cuando el navegador lo soporta. Si Safari no ofrece la lectura automática, se conserva el ingreso manual o por lector Bluetooth.
+
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.

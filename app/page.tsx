@@ -1,6 +1,14 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Login, SetupNeeded } from "./login";
 import { getSupabaseBrowser } from "./lib/supabase-browser";
 import {
@@ -12,6 +20,7 @@ import {
 type Section =
   | "inicio"
   | "inventario"
+  | "catalogo"
   | "compras"
   | "ventas"
   | "caja"
@@ -84,6 +93,7 @@ type SupplierRecord = {
   active: boolean;
 };
 type PurchaseLine = {
+  productId: string;
   sku: string;
   name: string;
   category: "accessory" | "phone" | "laptop" | "tablet";
@@ -92,6 +102,25 @@ type PurchaseLine = {
   sale_price: number | "";
   identifiers: string;
 };
+type CatalogProduct = {
+  id: string;
+  sku: string;
+  name: string;
+  brand: string | null;
+  category: PurchaseLine["category"];
+  variant: string | null;
+};
+type CatalogTemplate = {
+  id: string;
+  brand: string;
+  name: string;
+  category: PurchaseLine["category"];
+  variant_label: string;
+  variant_options: string[];
+};
+type DetectedBarcode = { rawValue?: string };
+type BrowserBarcodeDetector = { detect: (source: HTMLVideoElement) => Promise<DetectedBarcode[]> };
+type BrowserBarcodeConstructor = new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
 type ManagedUser = {
   id: string;
   name: string;
@@ -128,6 +157,7 @@ const money = new Intl.NumberFormat("es-PE", {
 const emptyCustomer: Customer = { name: "", dni: "", phone: "", address: "" };
 const newPayment = (): Payment => ({ method: "Efectivo", amount: "" });
 const newPurchaseLine = (): PurchaseLine => ({
+  productId: "",
   sku: "",
   name: "",
   category: "accessory",
@@ -178,7 +208,7 @@ export default function Home() {
   const operationLocationId =
     actor?.role === "seller"
       ? actor.locationId
-      : activeLocationId ?? actor?.locationId ?? "";
+      : (activeLocationId ?? actor?.locationId ?? "");
   const operationLocationName =
     locations.find((location) => location.id === operationLocationId)?.name ??
     actor?.locationName ??
@@ -230,7 +260,9 @@ export default function Home() {
     events.forEach((event) => window.addEventListener(event, resetIdleTimer));
     resetIdleTimer();
     return () => {
-      events.forEach((event) => window.removeEventListener(event, resetIdleTimer));
+      events.forEach((event) =>
+        window.removeEventListener(event, resetIdleTimer),
+      );
       if (warningTimer) window.clearTimeout(warningTimer);
       if (signOutTimer) window.clearTimeout(signOutTimer);
     };
@@ -335,9 +367,11 @@ export default function Home() {
     const locationId =
       current.role === "seller"
         ? current.locationId
-        : requestedLocationId ?? activeLocationId ?? current.locationId;
+        : (requestedLocationId ?? activeLocationId ?? current.locationId);
     setActiveLocationId((previous) =>
-      current.role === "seller" ? current.locationId : previous ?? current.locationId,
+      current.role === "seller"
+        ? current.locationId
+        : (previous ?? current.locationId),
     );
     const locationList = await supabase
       .from("locations")
@@ -348,46 +382,56 @@ export default function Home() {
     setLocations((locationList.data ?? []) as LocationOption[]);
     const [serials, accessories, prices, sales, expenses, history, ownCash] =
       await Promise.all([
-      supabase
-        .from("inventory_items")
-        .select("id, code, product_id, imei_1, serial, products!inner(name)")
-        .eq("location_id", locationId)
-        .eq("status", "available"),
-      supabase
-        .from("stock_balances")
-        .select("product_id, quantity, average_cost, products!inner(name, sku)")
-        .eq("location_id", locationId),
-      supabase
-        .from("product_prices")
-        .select("product_id, price")
-        .eq("location_id", locationId)
-        .eq("active", true),
-      supabase
-        .from("sales")
-        .select("total")
-        .eq("location_id", locationId)
-        .eq("status", "completed")
-        .gte("created_at", new Date().toISOString().slice(0, 10)),
-      supabase
-        .from("expenses")
-        .select("amount")
-        .eq("location_id", locationId)
-        .gte("expense_date", new Date().toISOString().slice(0, 10)),
-      supabase
-        .from("sales")
-        .select("id, code, customer_name, total, status, created_at")
-        .eq("location_id", locationId)
-        .order("created_at", { ascending: false })
-        .limit(40),
-      supabase
-        .from("cash_sessions")
-        .select("id")
-        .eq("location_id", locationId)
-        .eq("opened_by", current.id)
-        .is("closed_at", null)
-        .limit(1),
-    ]);
-    for (const result of [serials, accessories, prices, sales, expenses, history, ownCash])
+        supabase
+          .from("inventory_items")
+          .select("id, code, product_id, imei_1, serial, products!inner(name)")
+          .eq("location_id", locationId)
+          .eq("status", "available"),
+        supabase
+          .from("stock_balances")
+          .select(
+            "product_id, quantity, average_cost, products!inner(name, sku)",
+          )
+          .eq("location_id", locationId),
+        supabase
+          .from("product_prices")
+          .select("product_id, price")
+          .eq("location_id", locationId)
+          .eq("active", true),
+        supabase
+          .from("sales")
+          .select("total")
+          .eq("location_id", locationId)
+          .eq("status", "completed")
+          .gte("created_at", new Date().toISOString().slice(0, 10)),
+        supabase
+          .from("expenses")
+          .select("amount")
+          .eq("location_id", locationId)
+          .gte("expense_date", new Date().toISOString().slice(0, 10)),
+        supabase
+          .from("sales")
+          .select("id, code, customer_name, total, status, created_at")
+          .eq("location_id", locationId)
+          .order("created_at", { ascending: false })
+          .limit(40),
+        supabase
+          .from("cash_sessions")
+          .select("id")
+          .eq("location_id", locationId)
+          .eq("opened_by", current.id)
+          .is("closed_at", null)
+          .limit(1),
+      ]);
+    for (const result of [
+      serials,
+      accessories,
+      prices,
+      sales,
+      expenses,
+      history,
+      ownCash,
+    ])
       if (result.error) throw result.error;
     const priceMap = new Map(
       (prices.data ?? []).map((price) => [
@@ -424,13 +468,13 @@ export default function Home() {
     ];
     setStock(rows);
     const salesTotal = (sales.data ?? []).reduce(
-        (sum, item) => sum + Number(item.total),
-        0,
-      );
+      (sum, item) => sum + Number(item.total),
+      0,
+    );
     const expensesTotal = (expenses.data ?? []).reduce(
-        (sum, item) => sum + Number(item.amount),
-        0,
-      );
+      (sum, item) => sum + Number(item.amount),
+      0,
+    );
     setSalesHistory((history.data ?? []) as SaleRecord[]);
     setCashOpen((ownCash.data ?? []).length > 0);
     setMetrics({
@@ -551,87 +595,6 @@ export default function Home() {
     );
   };
 
-  const register = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!supabase || !actor) return;
-    const form = new FormData(event.currentTarget);
-    const photo = form.get("photo");
-    if (!(photo instanceof File) || !photo.size)
-      return setNotice("La foto del equipo es obligatoria.");
-    try {
-      const category = String(form.get("category"));
-      const sku = String(form.get("sku")).trim();
-      const name = String(form.get("name")).trim();
-      const imei = String(form.get("identifier")).trim();
-      const cost = Number(form.get("cost") || 0);
-      const price = Number(form.get("price") || 0);
-      const key = `uploads/${actor.id}/${crypto.randomUUID()}.${photo.type.split("/")[1] || "jpg"}`;
-      const upload = await supabase.storage
-        .from("thor-files")
-        .upload(key, photo, { contentType: photo.type });
-      if (upload.error) throw upload.error;
-      let product = await supabase
-        .from("products")
-        .select("id")
-        .eq("sku", sku)
-        .maybeSingle();
-      if (product.error) throw product.error;
-      if (!product.data)
-        product = await supabase
-          .from("products")
-          .insert({
-            sku,
-            name,
-            category,
-            serialised: category !== "accessory",
-            photo_path: key,
-            active: true,
-          })
-          .select("id")
-          .single();
-      if (product.error || !product.data)
-        throw product.error ?? new Error("No se pudo crear el producto.");
-      const code = `${category === "phone" ? "CEL" : category === "laptop" ? "LAP" : "TAB"}-${Date.now().toString().slice(-7)}`;
-      const item = await supabase
-        .from("inventory_items")
-        .insert({
-          code,
-          product_id: product.data.id,
-          location_id: operationLocationId,
-          imei_1: imei,
-          cost,
-          status: "available",
-          photo_path: key,
-        })
-        .select("id")
-        .single();
-      if (item.error) throw item.error;
-      await supabase
-        .from("product_prices")
-        .update({ active: false })
-        .eq("product_id", product.data.id)
-        .eq("location_id", operationLocationId)
-        .eq("active", true);
-      const priceSave = await supabase.from("product_prices").insert({
-        product_id: product.data.id,
-        location_id: operationLocationId,
-        price,
-        changed_by: actor.id,
-        active: true,
-      });
-      if (priceSave.error) throw priceSave.error;
-      setRegisterOpen(false);
-      await refresh();
-      setNotice(`Equipo ${name} registrado correctamente.`);
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "No se pudo registrar el equipo.",
-      );
-    }
-  };
-
   const completeSale = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !actor || !cart.length) return;
@@ -697,6 +660,9 @@ export default function Home() {
     setSection("inicio");
   };
 
+  // La recepción directa se mantiene desactivada: todo ingreso real pasa por Compras y Catálogo.
+  const register = (event: FormEvent<HTMLFormElement>) => event.preventDefault();
+
   const openNewRecord = () => {
     const targetBySection: Partial<Record<Section, string>> = {
       compras: "new-purchase",
@@ -723,22 +689,55 @@ export default function Home() {
     section === "compras"
       ? "Nueva recepción"
       : section === "clientes"
-      ? "Nuevo cliente"
-      : section === "proveedores"
-        ? "Nuevo proveedor"
-        : section === "usuarios"
-          ? "Nuevo usuario"
-          : "Nueva venta";
+        ? "Nuevo cliente"
+        : section === "proveedores"
+          ? "Nuevo proveedor"
+          : section === "usuarios"
+            ? "Nuevo usuario"
+            : "Nueva venta";
 
   const navigationItems = [
-    "inicio", "inventario", "compras", "ventas", "caja", "clientes", "proveedores", "usuarios", "manuales",
+    "inicio",
+    "inventario",
+    "catalogo",
+    "compras",
+    "ventas",
+    "caja",
+    "clientes",
+    "proveedores",
+    "usuarios",
+    "manuales",
   ] as Section[];
   const availableNavigation = navigationItems.filter(
-    (name) => (name !== "usuarios" && name !== "compras") || actor?.role !== "seller",
+    (name) =>
+      !["usuarios", "compras", "catalogo"].includes(name) ||
+      actor?.role !== "seller",
   );
-  const navigationLabel = (name: Section) => name === "manuales" ? "Manuales" : name === "usuarios" ? "Usuarios" : name[0].toUpperCase() + name.slice(1);
-  const navigationIcon = (name: Section) => ({ inicio: "⌂", inventario: "▦", compras: "▣", ventas: "▱", caja: "◫", clientes: "♙", proveedores: "▤", usuarios: "♙", manuales: "?" })[name];
-  const selectMobileSection = (name: Section) => { setSection(name); setMobileMenuOpen(false); };
+  const navigationLabel = (name: Section) =>
+    name === "manuales"
+      ? "Manuales"
+      : name === "usuarios"
+        ? "Usuarios"
+        : name === "catalogo"
+          ? "Catálogo"
+        : name[0].toUpperCase() + name.slice(1);
+  const navigationIcon = (name: Section) =>
+    ({
+      inicio: "⌂",
+      inventario: "▦",
+      catalogo: "◈",
+      compras: "▣",
+      ventas: "▱",
+      caja: "◫",
+      clientes: "♙",
+      proveedores: "▤",
+      usuarios: "♙",
+      manuales: "?",
+    })[name];
+  const selectMobileSection = (name: Section) => {
+    setSection(name);
+    setMobileMenuOpen(false);
+  };
 
   const items = useMemo(
     () =>
@@ -771,7 +770,9 @@ export default function Home() {
         </div>
         <p className="location-label">SEDE ACTIVA</p>
         {actor?.role === "seller" ? (
-          <button className="location" disabled>{operationLocationName}</button>
+          <button className="location" disabled>
+            {operationLocationName}
+          </button>
         ) : (
           <select
             className="location location-selector"
@@ -784,7 +785,9 @@ export default function Home() {
             aria-label="Cambiar sede operativa"
           >
             {locations.map((location) => (
-              <option key={location.id} value={location.id}>{location.name}</option>
+              <option key={location.id} value={location.id}>
+                {location.name}
+              </option>
             ))}
           </select>
         )}
@@ -793,6 +796,7 @@ export default function Home() {
             [
               "inicio",
               "inventario",
+              "catalogo",
               "compras",
               "ventas",
               "caja",
@@ -804,7 +808,7 @@ export default function Home() {
           )
             .filter(
               (name) =>
-                (name !== "usuarios" && name !== "compras") ||
+                !["usuarios", "compras", "catalogo"].includes(name) ||
                 actor?.role !== "seller",
             )
             .map((name) => (
@@ -819,33 +823,46 @@ export default function Home() {
                     ? "▦"
                     : name === "compras"
                       ? "▣"
-                    : name === "ventas"
-                      ? "▱"
-                      : name === "caja"
-                        ? "◫"
-                        : name === "clientes"
-                          ? "♙"
-                          : name === "proveedores"
-                            ? "▤"
-                        : name === "usuarios"
-                          ? "♙"
-                          : "?"}{" "}
+                      : name === "ventas"
+                        ? "▱"
+                        : name === "caja"
+                          ? "◫"
+                          : name === "clientes"
+                            ? "♙"
+                            : name === "proveedores"
+                              ? "▤"
+                              : name === "usuarios"
+                                ? "♙"
+                                : "?"}{" "}
                 {name === "manuales"
                   ? "Manuales"
                   : name === "usuarios"
                     ? "Usuarios"
+                    : name === "catalogo"
+                      ? "Catálogo"
                     : name[0].toUpperCase() + name.slice(1)}
               </button>
             ))}
         </nav>
         <div className="profile">
-          <label className="avatar avatar-upload" title="Cambiar foto de perfil">
+          <label
+            className="avatar avatar-upload"
+            title="Cambiar foto de perfil"
+          >
             {actor?.avatarPath && avatarUrl ? (
-              <img src={avatarUrl} alt={`Foto de ${actor?.name ?? "usuario"}`} />
+              <img
+                src={avatarUrl}
+                alt={`Foto de ${actor?.name ?? "usuario"}`}
+              />
             ) : (
-              actor?.name.slice(0, 2).toUpperCase() ?? "TH"
+              (actor?.name.slice(0, 2).toUpperCase() ?? "TH")
             )}
-            <input type="file" accept="image/*" onChange={uploadAvatar} aria-label="Cambiar foto de perfil" />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={uploadAvatar}
+              aria-label="Cambiar foto de perfil"
+            />
           </label>
           <div>
             <strong>{actor?.name ?? "THOR"}</strong>
@@ -869,35 +886,113 @@ export default function Home() {
             <span className="sign-out-label">Salir</span>
           </button>
         </div>
-        <div className="connection-status" role="status" title="THOR conectado a Supabase">
+        <div
+          className="connection-status"
+          role="status"
+          title="THOR conectado a Supabase"
+        >
           <span aria-hidden="true">●</span> Conectado
         </div>
       </aside>
       {mobileMenuOpen && (
-        <div className="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)}>
-          <aside className="mobile-menu" role="dialog" aria-modal="true" aria-label="Menú de navegación" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="mobile-menu-backdrop"
+          onClick={() => setMobileMenuOpen(false)}
+        >
+          <aside
+            className="mobile-menu"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menú de navegación"
+            onClick={(event) => event.stopPropagation()}
+          >
             <header className="mobile-menu-head">
-              <div className="brand"><span className="bolt">ϟ</span><span>THOR</span></div>
-              <button className="mobile-menu-close" type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button>
+              <div className="brand">
+                <span className="bolt">ϟ</span>
+                <span>THOR</span>
+              </div>
+              <button
+                className="mobile-menu-close"
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Cerrar menú"
+              >
+                ×
+              </button>
             </header>
             <div className="mobile-location">
               <p className="location-label">SEDE ACTIVA</p>
-              {actor?.role === "seller" ? <div className="location">{operationLocationName}</div> : (
-                <select className="location location-selector" value={operationLocationId} onChange={(event) => { const locationId = event.target.value; setActiveLocationId(locationId); void refresh(locationId); }} aria-label="Cambiar sede operativa">
-                  {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+              {actor?.role === "seller" ? (
+                <div className="location">{operationLocationName}</div>
+              ) : (
+                <select
+                  className="location location-selector"
+                  value={operationLocationId}
+                  onChange={(event) => {
+                    const locationId = event.target.value;
+                    setActiveLocationId(locationId);
+                    void refresh(locationId);
+                  }}
+                  aria-label="Cambiar sede operativa"
+                >
+                  {locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
                 </select>
               )}
             </div>
             <nav className="mobile-menu-links">
-              {availableNavigation.map((name) => <button key={name} className={`nav-item ${section === name ? "active" : ""}`} onClick={() => selectMobileSection(name)}><span aria-hidden="true">{navigationIcon(name)}</span>{navigationLabel(name)}</button>)}
+              {availableNavigation.map((name) => (
+                <button
+                  key={name}
+                  className={`nav-item ${section === name ? "active" : ""}`}
+                  onClick={() => selectMobileSection(name)}
+                >
+                  <span aria-hidden="true">{navigationIcon(name)}</span>
+                  {navigationLabel(name)}
+                </button>
+              ))}
             </nav>
             <footer className="mobile-profile">
-              <label className="avatar avatar-upload" title="Cambiar foto de perfil">
-                {actor?.avatarPath && avatarUrl ? <img src={avatarUrl} alt={`Foto de ${actor?.name ?? "usuario"}`} /> : actor?.name.slice(0, 2).toUpperCase() ?? "TH"}
-                <input type="file" accept="image/*" onChange={uploadAvatar} aria-label="Cambiar foto de perfil" />
+              <label
+                className="avatar avatar-upload"
+                title="Cambiar foto de perfil"
+              >
+                {actor?.avatarPath && avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt={`Foto de ${actor?.name ?? "usuario"}`}
+                  />
+                ) : (
+                  (actor?.name.slice(0, 2).toUpperCase() ?? "TH")
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={uploadAvatar}
+                  aria-label="Cambiar foto de perfil"
+                />
               </label>
-              <div><strong>{actor?.name ?? "THOR"}</strong><small>{actor?.role === "superadmin" ? "Superadministrador" : actor?.role === "admin" ? "Administrador general" : "Vendedor"}</small></div>
-              <button className="sign-out" onClick={() => void signOut()} aria-label="Cerrar sesión"><span aria-hidden="true">↪</span><span>Salir</span></button>
+              <div>
+                <strong>{actor?.name ?? "THOR"}</strong>
+                <small>
+                  {actor?.role === "superadmin"
+                    ? "Superadministrador"
+                    : actor?.role === "admin"
+                      ? "Administrador general"
+                      : "Vendedor"}
+                </small>
+              </div>
+              <button
+                className="sign-out"
+                onClick={() => void signOut()}
+                aria-label="Cerrar sesión"
+              >
+                <span aria-hidden="true">↪</span>
+                <span>Salir</span>
+              </button>
             </footer>
           </aside>
         </div>
@@ -905,11 +1000,19 @@ export default function Home() {
       <section className="workspace">
         {idleWarning && (
           <div className="idle-warning" role="status">
-            Por seguridad, tu sesión se cerrará pronto por inactividad. Realiza una acción para continuar.
+            Por seguridad, tu sesión se cerrará pronto por inactividad. Realiza
+            una acción para continuar.
           </div>
         )}
         <header className="topbar">
-          <button className="mobile-menu-trigger" type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menú">☰</button>
+          <button
+            className="mobile-menu-trigger"
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            aria-label="Abrir menú"
+          >
+            ☰
+          </button>
           <div>
             <p className="eyebrow">THOR · PERÚ</p>
             <h1>
@@ -971,7 +1074,10 @@ export default function Home() {
                   <p className="eyebrow">MOVIMIENTO RECIENTE</p>
                   <h3>Últimas ventas</h3>
                 </div>
-                <button className="text-button" onClick={() => setSection("ventas")}>
+                <button
+                  className="text-button"
+                  onClick={() => setSection("ventas")}
+                >
                   Ver ventas
                 </button>
               </div>
@@ -1003,9 +1109,14 @@ export default function Home() {
                   placeholder="Buscar por nombre, IMEI o código"
                 />
               </label>
-              <button className="primary" onClick={() => setRegisterOpen(true)}>
-                ＋ Registrar equipo
-              </button>
+              {actor?.role !== "seller" && (
+                <button
+                  className="primary"
+                  onClick={() => setSection("catalogo")}
+                >
+                  Gestionar catálogo
+                </button>
+              )}
             </div>
             <section className="card table-card">
               {items.length ? (
@@ -1045,12 +1156,14 @@ export default function Home() {
             </section>
           </div>
         )}
+        {section === "catalogo" && actor && actor.role !== "seller" && <CatalogCenter />}
         {section === "compras" && actor && actor.role !== "seller" && (
           <PurchaseCenter
             actor={{ ...actor, locationId: operationLocationId }}
             locationName={operationLocationName}
             cashOpen={cashOpen}
             onCompleted={refresh}
+            onOpenCatalog={() => setSection("catalogo")}
           />
         )}
         {section === "ventas" && (
@@ -1059,11 +1172,29 @@ export default function Home() {
               <div className="sale-section-head">
                 <div>
                   <p className="eyebrow">OPERACIÓN COMERCIAL</p>
-                  <h2>{salesView === "new" ? "Nueva venta" : "Historial de ventas"}</h2>
+                  <h2>
+                    {salesView === "new"
+                      ? "Nueva venta"
+                      : "Historial de ventas"}
+                  </h2>
                 </div>
-                <div className="view-switch" role="tablist" aria-label="Vista de ventas">
-                  <button className={salesView === "new" ? "selected" : ""} onClick={() => setSalesView("new")}>Nueva venta</button>
-                  <button className={salesView === "history" ? "selected" : ""} onClick={() => setSalesView("history")}>Historial</button>
+                <div
+                  className="view-switch"
+                  role="tablist"
+                  aria-label="Vista de ventas"
+                >
+                  <button
+                    className={salesView === "new" ? "selected" : ""}
+                    onClick={() => setSalesView("new")}
+                  >
+                    Nueva venta
+                  </button>
+                  <button
+                    className={salesView === "history" ? "selected" : ""}
+                    onClick={() => setSalesView("history")}
+                  >
+                    Historial
+                  </button>
                 </div>
               </div>
               {salesView === "new" ? (
@@ -1078,15 +1209,23 @@ export default function Home() {
                   </label>
                   <div className="sale-products">
                     {items.map((item) => (
-                      <button className="sale-product" key={item.id} onClick={() => addToCart(item)}>
+                      <button
+                        className="sale-product"
+                        key={item.id}
+                        onClick={() => addToCart(item)}
+                      >
                         <strong>{item.name}</strong>
-                        <small>{money.format(item.price)} · {item.availableQty} disp.</small>
+                        <small>
+                          {money.format(item.price)} · {item.availableQty} disp.
+                        </small>
                       </button>
                     ))}
                   </div>
                 </>
               ) : (
-                <section className="card sales-history-card"><SalesList sales={salesHistory} /></section>
+                <section className="card sales-history-card">
+                  <SalesList sales={salesHistory} />
+                </section>
               )}
             </section>
             <aside className="cart">
@@ -1123,7 +1262,8 @@ export default function Home() {
                       <option value="">Cliente general</option>
                       {customers.map((item) => (
                         <option key={item.id} value={item.id}>
-                          {item.name}{item.dni ? ` · DNI ${item.dni}` : ""}
+                          {item.name}
+                          {item.dni ? ` · DNI ${item.dni}` : ""}
                         </option>
                       ))}
                     </select>
@@ -1319,8 +1459,17 @@ export default function Home() {
                 {!cashOpen && (
                   <div className="cash-required" role="alert">
                     <strong>Abre tu caja antes de vender.</strong>
-                    <span>Ve al módulo Caja, registra el fondo inicial y luego confirma la venta.</span>
-                    <button type="button" className="text-button" onClick={() => setSection("caja")}>Abrir caja</button>
+                    <span>
+                      Ve al módulo Caja, registra el fondo inicial y luego
+                      confirma la venta.
+                    </span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setSection("caja")}
+                    >
+                      Abrir caja
+                    </button>
                   </div>
                 )}
                 <button
@@ -1356,7 +1505,9 @@ export default function Home() {
             customers={customers}
             onCreated={(created) =>
               setCustomers((current) =>
-                [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
+                [...current, created].sort((a, b) =>
+                  a.name.localeCompare(b.name),
+                ),
               )
             }
           />
@@ -1461,7 +1612,13 @@ function Metric({
   );
 }
 
-function SalesList({ sales, compact = false }: { sales: SaleRecord[]; compact?: boolean }) {
+function SalesList({
+  sales,
+  compact = false,
+}: {
+  sales: SaleRecord[];
+  compact?: boolean;
+}) {
   if (!sales.length)
     return <p className="empty">Aún no hay ventas confirmadas en esta sede.</p>;
   return (
@@ -1471,7 +1628,13 @@ function SalesList({ sales, compact = false }: { sales: SaleRecord[]; compact?: 
           <span className="movement-icon green">✓</span>
           <div>
             <strong>{sale.code}</strong>
-            <small>{sale.customer_name || "Cliente General"} · {new Date(sale.created_at).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}</small>
+            <small>
+              {sale.customer_name || "Cliente General"} ·{" "}
+              {new Date(sale.created_at).toLocaleString("es-PE", {
+                dateStyle: "short",
+                timeStyle: "short",
+              })}
+            </small>
           </div>
           <span className="badge success">Confirmada</span>
           <b>{money.format(Number(sale.total))}</b>
@@ -1481,19 +1644,105 @@ function SalesList({ sales, compact = false }: { sales: SaleRecord[]; compact?: 
   );
 }
 
+function CatalogCenter() {
+  const supabase = getSupabaseBrowser();
+  const [templates, setTemplates] = useState<CatalogTemplate[]>([]);
+  const [products, setProducts] = useState<CatalogProduct[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [variant, setVariant] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const template = templates.find((item) => item.id === templateId);
+  const load = useCallback(async () => {
+    if (!supabase) return;
+    const [templateResult, productResult] = await Promise.all([
+      supabase.from("product_catalog_templates").select("id, brand, name, category, variant_label, variant_options").eq("active", true).order("brand").order("name"),
+      supabase.from("products").select("id, sku, name, brand, category, variant").eq("active", true).order("brand").order("name"),
+    ]);
+    if (templateResult.error || productResult.error) setMessage("Ejecuta primero la migración de catálogo en Supabase.");
+    else { setTemplates((templateResult.data ?? []) as CatalogTemplate[]); setProducts((productResult.data ?? []) as CatalogProduct[]); }
+  }, [supabase]);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  const createReference = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !template || !variant) return setMessage("Elige modelo y variante.");
+    setSaving(true); setMessage("");
+    try { const result = await supabase.rpc("create_catalog_product", { p_template_id: template.id, p_variant: variant }); if (result.error) throw result.error; setMessage(`Referencia ${(result.data as { sku: string }).sku} lista para usar en Compras.`); setVariant(""); await load(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo crear la referencia."); }
+    finally { setSaving(false); }
+  };
+  const createTemplate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    const brand = String(form.get("brand") || "").trim(); const name = String(form.get("name") || "").trim(); const category = String(form.get("category") || "phone");
+    const options = String(form.get("variants") || "").split(",").map((item) => item.trim()).filter(Boolean);
+    if (!brand || !name || !options.length) return setMessage("Completa marca, modelo y al menos una variante.");
+    setSaving(true); setMessage("");
+    try {
+      const prefix = `${brand.slice(0, 4)}-${name}`.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 36);
+      const result = await supabase.from("product_catalog_templates").insert({ sku_prefix: `${prefix}-${Date.now().toString().slice(-4)}`, brand, name, category, variant_label: category === "phone" ? "Capacidad" : "Variante", variant_options: options });
+      if (result.error) throw result.error;
+      setCustomOpen(false); setMessage("Modelo creado en el catálogo. Ahora selecciónalo y crea su referencia."); await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo crear el modelo."); }
+    finally { setSaving(false); }
+  };
+  return <div className="content catalog-page"><section className="catalog-hero"><div><p className="eyebrow">CATÁLOGO CONTROLADO</p><h2>Primero la referencia. Luego el lote.</h2><p>Evita productos duplicados: elige marca, modelo y capacidad antes de recibir mercadería.</p></div><span className="badge success">{products.length} referencias activas</span></section><section className="card catalog-create" id="new-catalog-product"><div className="card-head"><div><p className="eyebrow">NUEVA REFERENCIA</p><h3>Crear una variante de catálogo</h3></div><button className="secondary" type="button" onClick={() => setCustomOpen((current) => !current)}>+ Nuevo modelo</button></div><form onSubmit={createReference} className="catalog-form"><label>Marca y modelo<select value={templateId} onChange={(event) => { setTemplateId(event.target.value); setVariant(""); }} required><option value="">Selecciona un modelo del mercado</option>{templates.map((item) => <option key={item.id} value={item.id}>{item.brand} · {item.name}</option>)}</select></label><label>{template?.variant_label ?? "Capacidad / variante"}<select value={variant} onChange={(event) => setVariant(event.target.value)} disabled={!template} required><option value="">Selecciona una opción</option>{template?.variant_options.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><button className="primary" type="submit" disabled={saving || !template}>{saving ? "Creando..." : "Crear referencia"}</button></form>{customOpen && <form className="catalog-custom-form" onSubmit={createTemplate}><label>Marca<input name="brand" placeholder="Ej. Xiaomi" required /></label><label>Modelo<input name="name" placeholder="Ej. Redmi Note 14 Pro" required /></label><label>Tipo<select name="category"><option value="phone">Celular</option><option value="accessory">Accesorio</option><option value="tablet">Tablet</option><option value="laptop">Laptop</option></select></label><label className="catalog-wide">Capacidades o variantes, separadas por coma<input name="variants" placeholder="128 GB, 256 GB, 512 GB" required /></label><button className="secondary" type="submit" disabled={saving}>Guardar modelo en catálogo</button></form>}</section><section className="card catalog-references"><div className="card-head"><div><p className="eyebrow">REFERENCIAS DISPONIBLES</p><h3>Usa estas referencias desde Compras</h3></div></div>{products.length ? <div className="catalog-reference-list">{products.map((product) => <article key={product.id}><div><strong>{[product.brand, product.name, product.variant].filter(Boolean).join(" · ")}</strong><small>{product.sku} · {product.category === "accessory" ? "Accesorio" : "Equipo serializado"}</small></div><span className="badge neutral">Activa</span></article>)}</div> : <p className="empty">Todavía no creaste referencias. Elige un modelo y capacidad arriba.</p>}</section>{message && <p className="users-message" role="status">{message}</p>}</div>;
+}
+
+function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let stream: MediaStream | null = null;
+    let stopped = false;
+    let timer = 0;
+    const start = async () => {
+      const Detector = (window as unknown as { BarcodeDetector?: BrowserBarcodeConstructor }).BarcodeDetector;
+      if (!Detector) { setMessage("Este navegador no permite lectura automática. Ingresa el IMEI o usa un lector Bluetooth."); return; }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+        if (!videoRef.current || stopped) return;
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        const detector = new Detector({ formats: ["code_128", "code_39", "ean_13", "qr_code", "data_matrix"] });
+        const scan = async () => {
+          if (stopped || !videoRef.current) return;
+          const codes = await detector.detect(videoRef.current);
+          const value = codes.find((code) => code.rawValue?.trim())?.rawValue?.trim();
+          if (value) { onDetected(value); setOpen(false); return; }
+          timer = window.setTimeout(() => void scan(), 400);
+        };
+        void scan();
+      } catch { setMessage("No se pudo abrir la cámara. Autoriza el permiso y vuelve a intentarlo."); }
+    };
+    void start();
+    return () => { stopped = true; window.clearTimeout(timer); stream?.getTracks().forEach((track) => track.stop()); };
+  }, [onDetected, open]);
+
+  return <div className="imei-scanner"><button className="text-button" type="button" onClick={() => { setMessage(""); setOpen(true); }}>Escanear con cámara</button>{open && <div className="scanner-panel"><video ref={videoRef} muted playsInline /><p>{message || "Apunta al código de barras donde figura el IMEI."}</p><button className="secondary" type="button" onClick={() => setOpen(false)}>Cerrar cámara</button></div>}</div>;
+}
+
 function PurchaseCenter({
   actor,
   locationName,
   cashOpen,
   onCompleted,
+  onOpenCatalog,
 }: {
   actor: { id: string; name: string; role: string; locationId: string };
   locationName: string;
   cashOpen: boolean;
   onCompleted: () => Promise<void>;
+  onOpenCatalog: () => void;
 }) {
   const supabase = getSupabaseBrowser();
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [receiptNumber, setReceiptNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
@@ -1502,112 +1751,288 @@ function PurchaseCenter({
   const [freightNote, setFreightNote] = useState("");
   const [invoice, setInvoice] = useState<File | null>(null);
   const [draft, setDraft] = useState<{ id: string; code: string } | null>(null);
-  const [pendingLots, setPendingLots] = useState<Array<{ id: string; code: string; receipt_number: string; supplier_id: string; payment_method: string; freight_amount: number; freight_payment_method: string | null; freight_description: string | null }>>([]);
+  const [pendingLots, setPendingLots] = useState<
+    Array<{
+      id: string;
+      code: string;
+      receipt_number: string;
+      supplier_id: string;
+      payment_method: string;
+      freight_amount: number;
+      freight_payment_method: string | null;
+      freight_description: string | null;
+    }>
+  >([]);
   const [line, setLine] = useState<PurchaseLine>(newPurchaseLine());
-  const [savedLines, setSavedLines] = useState<Array<{ sku: string; name: string; quantity: number; amount: number }>>([]);
+  const [savedLines, setSavedLines] = useState<
+    Array<{ sku: string; name: string; quantity: number; amount: number }>
+  >([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   const loadPurchaseSetup = useCallback(async () => {
     if (!supabase) return;
-    const [supplierResult, lotsResult] = await Promise.all([
-      supabase.from("suppliers").select("id, name, ruc, phone, contact, address, active").eq("active", true).order("name"),
-      supabase.from("receipt_lots").select("id, code, receipt_number, supplier_id, payment_method, freight_amount, freight_payment_method, freight_description").eq("location_id", actor.locationId).eq("status", "pending").order("created_at", { ascending: false }),
+    const [supplierResult, lotsResult, productsResult] = await Promise.all([
+      supabase
+        .from("suppliers")
+        .select("id, name, ruc, phone, contact, address, active")
+        .eq("active", true)
+        .order("name"),
+      supabase
+        .from("receipt_lots")
+        .select(
+          "id, code, receipt_number, supplier_id, payment_method, freight_amount, freight_payment_method, freight_description",
+        )
+        .eq("location_id", actor.locationId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("products")
+        .select("id, sku, name, brand, category, variant")
+        .eq("active", true)
+        .order("brand")
+        .order("name"),
     ]);
-    if (supplierResult.error || lotsResult.error) setMessage("No se pudo cargar la información de compras.");
+    if (supplierResult.error || lotsResult.error || productsResult.error)
+      setMessage(
+        "No se pudo cargar la información de compras. Ejecuta la migración de catálogo.",
+      );
     else {
       setSuppliers((supplierResult.data ?? []) as SupplierRecord[]);
-      setPendingLots((lotsResult.data ?? []) as Array<{ id: string; code: string; receipt_number: string; supplier_id: string; payment_method: string; freight_amount: number; freight_payment_method: string | null; freight_description: string | null }>);
+      setPendingLots(
+        (lotsResult.data ?? []) as Array<{
+          id: string;
+          code: string;
+          receipt_number: string;
+          supplier_id: string;
+          payment_method: string;
+          freight_amount: number;
+          freight_payment_method: string | null;
+          freight_description: string | null;
+        }>,
+      );
+      setCatalogProducts((productsResult.data ?? []) as CatalogProduct[]);
     }
   }, [actor.locationId, supabase]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadPurchaseSetup(); }, 0);
+    const timer = window.setTimeout(() => {
+      void loadPurchaseSetup();
+    }, 0);
     return () => window.clearTimeout(timer);
   }, [loadPurchaseSetup]);
 
   const invoiceTotal = savedLines.reduce((sum, item) => sum + item.amount, 0);
   const freightValue = Number(freight || 0);
-  const methodLabel = (method: string) => ({ cash_box: "Efectivo de caja", central_cash: "Efectivo central", bank_transfer: "Transferencia bancaria", yape_plin: "Yape / Plin" })[method] ?? method;
+  const methodLabel = (method: string) =>
+    ({
+      cash_box: "Efectivo de caja",
+      central_cash: "Efectivo central",
+      bank_transfer: "Transferencia bancaria",
+      yape_plin: "Yape / Plin",
+    })[method] ?? method;
+  const selectCatalogProduct = (productId: string) => {
+    const product = catalogProducts.find((item) => item.id === productId);
+    setLine((current) =>
+      product
+        ? {
+            ...current,
+            productId,
+            sku: product.sku,
+            name: product.name,
+            category: product.category,
+          }
+        : newPurchaseLine(),
+    );
+  };
 
   const createLot = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!supabase || !supplierId || !receiptNumber.trim()) return setMessage("Selecciona proveedor e ingresa factura o guía.");
-    setSaving(true); setMessage("");
+    if (!supabase || !supplierId || !receiptNumber.trim())
+      return setMessage("Selecciona proveedor e ingresa factura o guía.");
+    setSaving(true);
+    setMessage("");
     try {
       let invoicePath = "";
       if (invoice) {
         const extension = invoice.name.split(".").pop() || "jpg";
         invoicePath = `receipts/${actor.id}/${crypto.randomUUID()}.${extension}`;
-        const upload = await supabase.storage.from("thor-files").upload(invoicePath, invoice, { contentType: invoice.type || "image/jpeg" });
+        const upload = await supabase.storage
+          .from("thor-files")
+          .upload(invoicePath, invoice, {
+            contentType: invoice.type || "image/jpeg",
+          });
         if (upload.error) throw upload.error;
       }
       const result = await supabase.rpc("create_purchase_lot", {
-        p_supplier_id: supplierId, p_location_id: actor.locationId, p_receipt_number: receiptNumber.trim(),
-        p_payment_method: paymentMethod, p_receipt_photo_path: invoicePath, p_freight_amount: freightValue,
-        p_freight_payment_method: freightValue > 0 ? freightMethod : null, p_freight_description: freightNote.trim() || null,
+        p_supplier_id: supplierId,
+        p_location_id: actor.locationId,
+        p_receipt_number: receiptNumber.trim(),
+        p_payment_method: paymentMethod,
+        p_receipt_photo_path: invoicePath,
+        p_freight_amount: freightValue,
+        p_freight_payment_method: freightValue > 0 ? freightMethod : null,
+        p_freight_description: freightNote.trim() || null,
       });
       if (result.error) throw result.error;
       const data = result.data as { lot_id: string; code: string };
       setDraft({ id: data.lot_id, code: data.code });
       void loadPurchaseSetup();
-      setMessage(`Lote ${data.code} creado. Ahora agrega los productos que llegaron.`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo crear el lote."); }
-    finally { setSaving(false); }
+      setMessage(
+        `Lote ${data.code} creado. Ahora agrega los productos que llegaron.`,
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo crear el lote.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const resumeLot = async (lotId: string) => {
     if (!supabase) return;
     const lot = pendingLots.find((item) => item.id === lotId);
     if (!lot) return;
-    setSaving(true); setMessage("");
+    setSaving(true);
+    setMessage("");
     try {
-      const result = await supabase.from("receipt_lot_lines").select("quantity, unit_cost, products(sku, name)").eq("receipt_lot_id", lotId);
+      const result = await supabase
+        .from("receipt_lot_lines")
+        .select("quantity, unit_cost, products(sku, name)")
+        .eq("receipt_lot_id", lotId);
       if (result.error) throw result.error;
-      const rows = (result.data ?? []) as Array<{ quantity: number; unit_cost: number; products: Array<{ sku: string; name: string }> | null }>;
-      setSupplierId(lot.supplier_id); setReceiptNumber(lot.receipt_number); setPaymentMethod(lot.payment_method);
-      setFreight(Number(lot.freight_amount || 0)); setFreightMethod(lot.freight_payment_method || "bank_transfer"); setFreightNote(lot.freight_description || "");
-      setSavedLines(rows.map((item) => ({ sku: item.products?.[0]?.sku ?? "SKU", name: item.products?.[0]?.name ?? "Producto", quantity: Number(item.quantity), amount: Number(item.quantity) * Number(item.unit_cost) })));
+      const rows = (result.data ?? []) as Array<{
+        quantity: number;
+        unit_cost: number;
+        products: Array<{ sku: string; name: string }> | null;
+      }>;
+      setSupplierId(lot.supplier_id);
+      setReceiptNumber(lot.receipt_number);
+      setPaymentMethod(lot.payment_method);
+      setFreight(Number(lot.freight_amount || 0));
+      setFreightMethod(lot.freight_payment_method || "bank_transfer");
+      setFreightNote(lot.freight_description || "");
+      setSavedLines(
+        rows.map((item) => ({
+          sku: item.products?.[0]?.sku ?? "SKU",
+          name: item.products?.[0]?.name ?? "Producto",
+          quantity: Number(item.quantity),
+          amount: Number(item.quantity) * Number(item.unit_cost),
+        })),
+      );
       setDraft({ id: lot.id, code: lot.code });
-      setMessage(`Lote ${lot.code} retomado. Puedes continuar agregando mercadería.`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo retomar el lote."); }
-    finally { setSaving(false); }
+      setMessage(
+        `Lote ${lot.code} retomado. Puedes continuar agregando mercadería.`,
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo retomar el lote.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const addLine = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !draft) return;
-    const identifiers = line.identifiers.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean);
-    if (!line.sku.trim() || !line.name.trim() || line.unit_cost === "" || line.sale_price === "") return setMessage("Completa SKU, producto, costo y precio.");
-    if (line.category !== "accessory" && identifiers.length !== Number(line.quantity)) return setMessage("La cantidad debe coincidir con los IMEI o series ingresados.");
-    setSaving(true); setMessage("");
+    const identifiers = line.identifiers
+      .split(/[\n,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!line.productId || line.unit_cost === "" || line.sale_price === "")
+      return setMessage(
+        "Selecciona primero una referencia del catálogo y completa costo y precio.",
+      );
+    if (
+      line.category !== "accessory" &&
+      identifiers.length !== Number(line.quantity)
+    )
+      return setMessage(
+        "La cantidad debe coincidir con los IMEI o series ingresados.",
+      );
+    setSaving(true);
+    setMessage("");
     try {
-      const result = await supabase.rpc("add_purchase_lot_line", {
-        p_lot_id: draft.id, p_sku: line.sku.trim(), p_name: line.name.trim(), p_category: line.category,
-        p_quantity: Number(line.quantity), p_unit_cost: Number(line.unit_cost), p_sale_price: Number(line.sale_price), p_identifiers: identifiers,
+      const result = await supabase.rpc("add_catalog_product_to_lot", {
+        p_lot_id: draft.id,
+        p_product_id: line.productId,
+        p_quantity: Number(line.quantity),
+        p_unit_cost: Number(line.unit_cost),
+        p_sale_price: Number(line.sale_price),
+        p_identifiers: identifiers,
       });
       if (result.error) throw result.error;
-      setSavedLines((current) => [...current, { sku: line.sku.trim(), name: line.name.trim(), quantity: Number(line.quantity), amount: Number(line.quantity) * Number(line.unit_cost) }]);
+      setSavedLines((current) => [
+        ...current,
+        {
+          sku: line.sku.trim(),
+          name: line.name.trim(),
+          quantity: Number(line.quantity),
+          amount: Number(line.quantity) * Number(line.unit_cost),
+        },
+      ]);
       setLine(newPurchaseLine());
-      setMessage("Producto agregado al lote. Puedes añadir otro o confirmar la recepción.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo agregar el producto."); }
-    finally { setSaving(false); }
+      setMessage(
+        "Producto agregado al lote. Puedes añadir otro o confirmar la recepción.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo agregar el producto.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const confirmLot = async () => {
-    if (!supabase || !draft || !savedLines.length) return setMessage("Agrega al menos un producto antes de confirmar.");
-    if ((paymentMethod === "cash_box" || paymentMethod === "central_cash" || (freightValue > 0 && (freightMethod === "cash_box" || freightMethod === "central_cash"))) && !cashOpen) return setMessage("Abre tu caja antes de confirmar pagos en efectivo.");
-    setSaving(true); setMessage("");
+    if (!supabase || !draft || !savedLines.length)
+      return setMessage("Agrega al menos un producto antes de confirmar.");
+    if (
+      (paymentMethod === "cash_box" ||
+        paymentMethod === "central_cash" ||
+        (freightValue > 0 &&
+          (freightMethod === "cash_box" ||
+            freightMethod === "central_cash"))) &&
+      !cashOpen
+    )
+      return setMessage("Abre tu caja antes de confirmar pagos en efectivo.");
+    setSaving(true);
+    setMessage("");
     try {
-      const result = await supabase.rpc("confirm_purchase_lot", { p_lot_id: draft.id });
+      const result = await supabase.rpc("confirm_purchase_lot", {
+        p_lot_id: draft.id,
+      });
       if (result.error) throw result.error;
-      const data = result.data as { code?: string; total_outflow?: number } | null;
-      setMessage(`Lote ${data?.code ?? draft.code} confirmado. Salida total registrada: ${money.format(Number(data?.total_outflow ?? 0))}.`);
-      setDraft(null); setSupplierId(""); setReceiptNumber(""); setInvoice(null); setFreight(""); setFreightNote(""); setSavedLines([]); setLine(newPurchaseLine());
+      const data = result.data as {
+        code?: string;
+        total_outflow?: number;
+      } | null;
+      setMessage(
+        `Lote ${data?.code ?? draft.code} confirmado. Salida total registrada: ${money.format(Number(data?.total_outflow ?? 0))}.`,
+      );
+      setDraft(null);
+      setSupplierId("");
+      setReceiptNumber("");
+      setInvoice(null);
+      setFreight("");
+      setFreightNote("");
+      setSavedLines([]);
+      setLine(newPurchaseLine());
       void loadPurchaseSetup();
       await onCompleted();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar el lote."); }
-    finally { setSaving(false); }
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo confirmar el lote.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1618,26 +2043,351 @@ function PurchaseCenter({
             <div>
               <p className="eyebrow">LOTES ABIERTOS</p>
               <h3>Continuar una recepción</h3>
-              <p>Elige un lote ya creado para seguir agregando productos sin repetir la factura ni el flete.</p>
+              <p>
+                Elige un lote ya creado para seguir agregando productos sin
+                repetir la factura ni el flete.
+              </p>
             </div>
-            <span className="badge neutral">{pendingLots.length} pendiente{pendingLots.length === 1 ? "" : "s"}</span>
+            <span className="badge neutral">
+              {pendingLots.length} pendiente
+              {pendingLots.length === 1 ? "" : "s"}
+            </span>
           </div>
           <div className="pending-lot-list">
             {pendingLots.map((lot) => (
               <article key={lot.id}>
                 <div>
                   <strong>{lot.code}</strong>
-                  <small>Factura {lot.receipt_number} · {suppliers.find((supplier) => supplier.id === lot.supplier_id)?.name ?? "Proveedor"}</small>
+                  <small>
+                    Factura {lot.receipt_number} ·{" "}
+                    {suppliers.find(
+                      (supplier) => supplier.id === lot.supplier_id,
+                    )?.name ?? "Proveedor"}
+                  </small>
                 </div>
-                <button className="secondary" type="button" onClick={() => void resumeLot(lot.id)} disabled={saving}>Continuar</button>
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => void resumeLot(lot.id)}
+                  disabled={saving}
+                >
+                  Continuar
+                </button>
               </article>
             ))}
           </div>
         </section>
       )}
-      <section className="purchases-hero"><div><p className="eyebrow">ABASTECIMIENTO Y TESORERÍA</p><h2>Compras y recepción por lote</h2><p>Primero crea la cabecera del lote. Después agrega productos o IMEI y confirma una sola vez la entrada y los pagos.</p></div><div className="purchase-total"><span>{draft ? `Lote activo ${draft.code}` : "Destino de la recepción"}</span><strong>{draft ? money.format(invoiceTotal + freightValue) : locationName}</strong><small>{draft ? "Factura + flete" : "Stock separado por sede"}</small></div></section>
-      {!draft ? <form className="purchase-form" id="new-purchase" onSubmit={createLot}><section className="card purchase-header-card"><div className="card-head"><div><p className="eyebrow">01 · CREAR LOTE</p><h3>Documento, pagos y flete</h3><p>La factura, el proveedor y los gastos se guardan una sola vez en la cabecera.</p></div><span className="badge success">Sin crédito</span></div><div className="purchase-fields"><label>Proveedor<select value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required><option value="">Selecciona un proveedor</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.ruc ? ` · RUC ${supplier.ruc}` : ""}</option>)}</select></label><label>Factura o guía<input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value)} required placeholder="Ej. F001-000245" /></label><label>Pago de factura<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="bank_transfer">Transferencia bancaria · tesorería</option><option value="yape_plin">Yape / Plin · tesorería</option><option value="cash_box">Efectivo · caja de sede</option><option value="central_cash">Efectivo · caja central</option></select></label><label>Comprobante<input type="file" accept="image/*,.pdf" capture="environment" onChange={(event) => setInvoice(event.target.files?.[0] ?? null)} /><small>En celular abre la cámara para foto de factura.</small></label><label>Flete (S/)<input type="number" min="0" step="0.01" value={freight} onChange={(event) => setFreight(event.target.value === "" ? "" : Number(event.target.value))} placeholder="0.00" /></label><label>Pago de flete<select value={freightMethod} onChange={(event) => setFreightMethod(event.target.value)} disabled={!freightValue}><option value="bank_transfer">Transferencia · tesorería</option><option value="yape_plin">Yape / Plin · tesorería</option><option value="cash_box">Efectivo · caja de sede</option><option value="central_cash">Efectivo · caja central</option></select></label><label className="purchase-wide">Detalle del flete<input value={freightNote} onChange={(event) => setFreightNote(event.target.value)} placeholder="Ej. Transporte Lima - almacén central" /></label></div>{(paymentMethod.includes("cash") || (freightValue > 0 && freightMethod.includes("cash"))) && !cashOpen && <p className="cash-required"><strong>La caja está cerrada.</strong> Abre tu caja antes de usar efectivo.</p>}<div className="purchase-submit"><div><span>Pago de factura</span><strong>{methodLabel(paymentMethod)}</strong></div><button className="primary" type="submit" disabled={saving}>{saving ? "Creando lote..." : "Crear lote y agregar productos"}</button></div></section></form> : <div className="purchase-form"><section className="card purchase-header-card"><div className="card-head"><div><p className="eyebrow">02 · LOTE {draft.code}</p><h3>Agregar productos al lote</h3><p>Accesorios por cantidad; celulares con un IMEI por unidad. Usa teclado numérico o un lector de códigos del teléfono.</p></div><span className="badge success">Lote abierto</span></div><form onSubmit={addLine}><div className="purchase-line-grid"><label>SKU<input value={line.sku} onChange={(event) => setLine({ ...line, sku: event.target.value })} placeholder="APP-CHG-20W" required /></label><label>Producto<input value={line.name} onChange={(event) => setLine({ ...line, name: event.target.value })} placeholder="Cargador USB-C 20W" required /></label><label>Tipo<select value={line.category} onChange={(event) => setLine({ ...line, category: event.target.value as PurchaseLine["category"] })}><option value="accessory">Accesorio / cargador</option><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>Cantidad<input type="number" min="1" inputMode="numeric" value={line.quantity} onChange={(event) => setLine({ ...line, quantity: Math.max(1, Number(event.target.value)) })} /></label><label>Costo unitario<input type="number" min="0" step="0.01" inputMode="decimal" value={line.unit_cost} onChange={(event) => setLine({ ...line, unit_cost: event.target.value === "" ? "" : Number(event.target.value) })} required /></label><label>Precio de venta<input type="number" min="0" step="0.01" inputMode="decimal" value={line.sale_price} onChange={(event) => setLine({ ...line, sale_price: event.target.value === "" ? "" : Number(event.target.value) })} required /></label></div>{line.category !== "accessory" && <label className="identifiers-field">IMEI o serie <textarea value={line.identifiers} onChange={(event) => setLine({ ...line, identifiers: event.target.value })} placeholder="Uno por línea o separado por comas." required /></label>}<div className="purchase-submit"><div><span>Subtotal de este producto</span><strong>{money.format(Number(line.quantity || 0) * Number(line.unit_cost || 0))}</strong></div><button className="secondary" type="submit" disabled={saving}>Agregar al lote</button></div></form></section><section className="card recent-lots"><div className="card-head"><div><p className="eyebrow">CONTENIDO DEL LOTE</p><h3>{savedLines.length} productos agregados</h3></div><span className="badge neutral">Factura: {money.format(invoiceTotal)}</span></div>{savedLines.length ? <div className="cash-list">{savedLines.map((item, index) => <article key={`${item.sku}-${index}`}><div><strong>{item.name}</strong><small>{item.sku} · {item.quantity} unidades</small></div><b>{money.format(item.amount)}</b></article>)}</div> : <p className="empty">Aún no agregaste mercadería a este lote.</p>}<div className="purchase-submit"><div><span>Flete: {money.format(freightValue)} · Total de salida</span><strong>{money.format(invoiceTotal + freightValue)}</strong></div><button className="primary" type="button" onClick={() => void confirmLot()} disabled={saving || !savedLines.length}>{saving ? "Confirmando..." : "Confirmar lote, pago y stock"}</button></div></section></div>}
-      {message && <p className="users-message" role="status">{message}</p>}
+      <section className="purchases-hero">
+        <div>
+          <p className="eyebrow">ABASTECIMIENTO Y TESORERÍA</p>
+          <h2>Compras y recepción por lote</h2>
+          <p>
+            Primero crea la cabecera del lote. Después agrega productos o IMEI y
+            confirma una sola vez la entrada y los pagos.
+          </p>
+        </div>
+        <div className="purchase-total">
+          <span>
+            {draft ? `Lote activo ${draft.code}` : "Destino de la recepción"}
+          </span>
+          <strong>
+            {draft ? money.format(invoiceTotal + freightValue) : locationName}
+          </strong>
+          <small>{draft ? "Factura + flete" : "Stock separado por sede"}</small>
+        </div>
+      </section>
+      {!draft ? (
+        <form className="purchase-form" id="new-purchase" onSubmit={createLot}>
+          <section className="card purchase-header-card">
+            <div className="card-head">
+              <div>
+                <p className="eyebrow">01 · CREAR LOTE</p>
+                <h3>Documento, pagos y flete</h3>
+                <p>
+                  La factura, el proveedor y los gastos se guardan una sola vez
+                  en la cabecera.
+                </p>
+              </div>
+              <span className="badge success">Sin crédito</span>
+            </div>
+            <div className="purchase-fields">
+              <label>
+                Proveedor
+                <select
+                  value={supplierId}
+                  onChange={(event) => setSupplierId(event.target.value)}
+                  required
+                >
+                  <option value="">Selecciona un proveedor</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                      {supplier.ruc ? ` · RUC ${supplier.ruc}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Factura o guía
+                <input
+                  value={receiptNumber}
+                  onChange={(event) => setReceiptNumber(event.target.value)}
+                  required
+                  placeholder="Ej. F001-000245"
+                />
+              </label>
+              <label>
+                Pago de factura
+                <select
+                  value={paymentMethod}
+                  onChange={(event) => setPaymentMethod(event.target.value)}
+                >
+                  <option value="bank_transfer">
+                    Transferencia bancaria · tesorería
+                  </option>
+                  <option value="yape_plin">Yape / Plin · tesorería</option>
+                  <option value="cash_box">Efectivo · caja de sede</option>
+                  <option value="central_cash">Efectivo · caja central</option>
+                </select>
+              </label>
+              <label>
+                Comprobante
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  capture="environment"
+                  onChange={(event) =>
+                    setInvoice(event.target.files?.[0] ?? null)
+                  }
+                />
+                <small>En celular abre la cámara para foto de factura.</small>
+              </label>
+              <label>
+                Flete (S/)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={freight}
+                  onChange={(event) =>
+                    setFreight(
+                      event.target.value === ""
+                        ? ""
+                        : Number(event.target.value),
+                    )
+                  }
+                  placeholder="0.00"
+                />
+              </label>
+              <label>
+                Pago de flete
+                <select
+                  value={freightMethod}
+                  onChange={(event) => setFreightMethod(event.target.value)}
+                  disabled={!freightValue}
+                >
+                  <option value="bank_transfer">
+                    Transferencia · tesorería
+                  </option>
+                  <option value="yape_plin">Yape / Plin · tesorería</option>
+                  <option value="cash_box">Efectivo · caja de sede</option>
+                  <option value="central_cash">Efectivo · caja central</option>
+                </select>
+              </label>
+              <label className="purchase-wide">
+                Detalle del flete
+                <input
+                  value={freightNote}
+                  onChange={(event) => setFreightNote(event.target.value)}
+                  placeholder="Ej. Transporte Lima - almacén central"
+                />
+              </label>
+            </div>
+            {(paymentMethod.includes("cash") ||
+              (freightValue > 0 && freightMethod.includes("cash"))) &&
+              !cashOpen && (
+                <p className="cash-required">
+                  <strong>La caja está cerrada.</strong> Abre tu caja antes de
+                  usar efectivo.
+                </p>
+              )}
+            <div className="purchase-submit">
+              <div>
+                <span>Pago de factura</span>
+                <strong>{methodLabel(paymentMethod)}</strong>
+              </div>
+              <button className="primary" type="submit" disabled={saving}>
+                {saving ? "Creando lote..." : "Crear lote y agregar productos"}
+              </button>
+            </div>
+          </section>
+        </form>
+      ) : (
+        <div className="purchase-form">
+          <section className="card purchase-header-card">
+            <div className="card-head">
+              <div>
+                <p className="eyebrow">02 · LOTE {draft.code}</p>
+                <h3>Agregar productos al lote</h3>
+                <p>
+                  Accesorios por cantidad; celulares con un IMEI por unidad. Usa
+                  teclado numérico o un lector de códigos del teléfono.
+                </p>
+              </div>
+              <span className="badge success">Lote abierto</span>
+            </div>
+            <form onSubmit={addLine}>
+              <div className="catalog-product-picker">
+                <label>
+                  Referencia del catÃ¡logo
+                  <select value={line.productId} onChange={(event) => selectCatalogProduct(event.target.value)} required>
+                    <option value="">Selecciona marca, modelo y capacidad</option>
+                    {catalogProducts.map((product) => <option key={product.id} value={product.id}>{[product.brand, product.name, product.variant].filter(Boolean).join(" Â· ")}</option>)}
+                  </select>
+                </label>
+                <div className="catalog-help">
+                  <strong>{line.productId ? `${line.sku} Â· ${line.category === "accessory" ? "Accesorio" : "Equipo serializado"}` : "Â¿No existe la referencia?"}</strong>
+                  <button type="button" className="text-button" onClick={onOpenCatalog}>Crear primero en CatÃ¡logo</button>
+                </div>
+              </div>
+              <div className="purchase-line-grid purchase-price-grid">
+                <label>
+                  Cantidad
+                  <input
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={line.quantity}
+                    onChange={(event) =>
+                      setLine({
+                        ...line,
+                        quantity: Math.max(1, Number(event.target.value)),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Costo unitario
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={line.unit_cost}
+                    onChange={(event) =>
+                      setLine({
+                        ...line,
+                        unit_cost:
+                          event.target.value === ""
+                            ? ""
+                            : Number(event.target.value),
+                      })
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  Precio de venta
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={line.sale_price}
+                    onChange={(event) =>
+                      setLine({
+                        ...line,
+                        sale_price:
+                          event.target.value === ""
+                            ? ""
+                            : Number(event.target.value),
+                      })
+                    }
+                    required
+                  />
+                </label>
+              </div>
+              {line.category !== "accessory" && (
+                <label className="identifiers-field">
+                  <span className="imei-label">IMEI o serie <ImeiScanner onDetected={(value) => setLine((current) => ({ ...current, identifiers: current.identifiers ? `${current.identifiers}\n${value}` : value }))} /></span>
+                  <textarea
+                    value={line.identifiers}
+                    inputMode="numeric"
+                    onChange={(event) =>
+                      setLine({ ...line, identifiers: event.target.value })
+                    }
+                    placeholder="Uno por línea o separado por comas."
+                    required
+                  />
+                </label>
+              )}
+              <div className="purchase-submit">
+                <div>
+                  <span>Subtotal de este producto</span>
+                  <strong>
+                    {money.format(
+                      Number(line.quantity || 0) * Number(line.unit_cost || 0),
+                    )}
+                  </strong>
+                </div>
+                <button className="secondary" type="submit" disabled={saving}>
+                  Agregar al lote
+                </button>
+              </div>
+            </form>
+          </section>
+          <section className="card recent-lots">
+            <div className="card-head">
+              <div>
+                <p className="eyebrow">CONTENIDO DEL LOTE</p>
+                <h3>{savedLines.length} productos agregados</h3>
+              </div>
+              <span className="badge neutral">
+                Factura: {money.format(invoiceTotal)}
+              </span>
+            </div>
+            {savedLines.length ? (
+              <div className="cash-list">
+                {savedLines.map((item, index) => (
+                  <article key={`${item.sku}-${index}`}>
+                    <div>
+                      <strong>{item.name}</strong>
+                      <small>
+                        {item.sku} · {item.quantity} unidades
+                      </small>
+                    </div>
+                    <b>{money.format(item.amount)}</b>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty">Aún no agregaste mercadería a este lote.</p>
+            )}
+            <div className="purchase-submit">
+              <div>
+                <span>
+                  Flete: {money.format(freightValue)} · Total de salida
+                </span>
+                <strong>{money.format(invoiceTotal + freightValue)}</strong>
+              </div>
+              <button
+                className="primary"
+                type="button"
+                onClick={() => void confirmLot()}
+                disabled={saving || !savedLines.length}
+              >
+                {saving ? "Confirmando..." : "Confirmar lote, pago y stock"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {message && (
+        <p className="users-message" role="status">
+          {message}
+        </p>
+      )}
     </div>
   );
 }
@@ -1657,7 +2407,16 @@ function LegacyPurchaseCenter({
 }) {
   const supabase = getSupabaseBrowser();
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
-  const [recentLots, setRecentLots] = useState<Array<{ id: string; code: string; receipt_number: string | null; total_cost: number; created_at: string; suppliers: { name: string }[] }>>([]);
+  const [recentLots, setRecentLots] = useState<
+    Array<{
+      id: string;
+      code: string;
+      receipt_number: string | null;
+      total_cost: number;
+      created_at: string;
+      suppliers: { name: string }[];
+    }>
+  >([]);
   const [supplierId, setSupplierId] = useState("");
   const [receiptNumber, setReceiptNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
@@ -1669,15 +2428,35 @@ function LegacyPurchaseCenter({
   const load = useCallback(async () => {
     if (!supabase) return;
     const [supplierResult, lotResult] = await Promise.all([
-      supabase.from("suppliers").select("id, name, ruc, phone, contact, address, active").eq("active", true).order("name"),
-      supabase.from("receipt_lots").select("id, code, receipt_number, total_cost, created_at, suppliers(name)").eq("location_id", actor.locationId).order("created_at", { ascending: false }).limit(8),
+      supabase
+        .from("suppliers")
+        .select("id, name, ruc, phone, contact, address, active")
+        .eq("active", true)
+        .order("name"),
+      supabase
+        .from("receipt_lots")
+        .select(
+          "id, code, receipt_number, total_cost, created_at, suppliers(name)",
+        )
+        .eq("location_id", actor.locationId)
+        .order("created_at", { ascending: false })
+        .limit(8),
     ]);
     if (supplierResult.error || lotResult.error) {
       setMessage("No se pudieron cargar proveedores o recepciones.");
       return;
     }
     setSuppliers((supplierResult.data ?? []) as SupplierRecord[]);
-    setRecentLots((lotResult.data ?? []) as Array<{ id: string; code: string; receipt_number: string | null; total_cost: number; created_at: string; suppliers: { name: string }[] }>);
+    setRecentLots(
+      (lotResult.data ?? []) as Array<{
+        id: string;
+        code: string;
+        receipt_number: string | null;
+        total_cost: number;
+        created_at: string;
+        suppliers: { name: string }[];
+      }>,
+    );
   }, [actor.locationId, supabase]);
 
   useEffect(() => {
@@ -1686,24 +2465,50 @@ function LegacyPurchaseCenter({
   }, [load]);
 
   const total = lines.reduce(
-    (sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_cost || 0),
+    (sum, line) =>
+      sum + Number(line.quantity || 0) * Number(line.unit_cost || 0),
     0,
   );
-  const updateLine = <K extends keyof PurchaseLine>(index: number, key: K, value: PurchaseLine[K]) => {
-    setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, [key]: value } : line));
+  const updateLine = <K extends keyof PurchaseLine>(
+    index: number,
+    key: K,
+    value: PurchaseLine[K],
+  ) => {
+    setLines((current) =>
+      current.map((line, lineIndex) =>
+        lineIndex === index ? { ...line, [key]: value } : line,
+      ),
+    );
   };
 
   const savePurchase = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !supplierId || !receiptNumber.trim()) {
-      setMessage("Selecciona el proveedor e ingresa el número de factura o guía.");
+      setMessage(
+        "Selecciona el proveedor e ingresa el número de factura o guía.",
+      );
       return;
     }
-    if (!lines.length || lines.some((line) => !line.sku.trim() || !line.name.trim() || !line.quantity || line.unit_cost === "" || line.sale_price === "")) {
-      setMessage("Completa SKU, producto, cantidad, costo y precio en cada línea.");
+    if (
+      !lines.length ||
+      lines.some(
+        (line) =>
+          !line.sku.trim() ||
+          !line.name.trim() ||
+          !line.quantity ||
+          line.unit_cost === "" ||
+          line.sale_price === "",
+      )
+    ) {
+      setMessage(
+        "Completa SKU, producto, cantidad, costo y precio en cada línea.",
+      );
       return;
     }
-    if ((paymentMethod === "cash_box" || paymentMethod === "central_cash") && !cashOpen) {
+    if (
+      (paymentMethod === "cash_box" || paymentMethod === "central_cash") &&
+      !cashOpen
+    ) {
       setMessage("Abre tu caja antes de registrar un pago en efectivo.");
       return;
     }
@@ -1714,7 +2519,11 @@ function LegacyPurchaseCenter({
       if (invoice) {
         const extension = invoice.name.split(".").pop() || "file";
         invoicePath = `receipts/${actor.id}/${crypto.randomUUID()}.${extension}`;
-        const upload = await supabase.storage.from("thor-files").upload(invoicePath, invoice, { contentType: invoice.type || "application/octet-stream" });
+        const upload = await supabase.storage
+          .from("thor-files")
+          .upload(invoicePath, invoice, {
+            contentType: invoice.type || "application/octet-stream",
+          });
         if (upload.error) throw upload.error;
       }
       const result = await supabase.rpc("receive_supplier_lot", {
@@ -1730,7 +2539,10 @@ function LegacyPurchaseCenter({
           quantity: Number(line.quantity),
           unit_cost: Number(line.unit_cost),
           sale_price: Number(line.sale_price),
-          identifiers: line.identifiers.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean),
+          identifiers: line.identifiers
+            .split(/[\n,]+/)
+            .map((value) => value.trim())
+            .filter(Boolean),
         })),
       });
       if (result.error) throw result.error;
@@ -1739,10 +2551,16 @@ function LegacyPurchaseCenter({
       setReceiptNumber("");
       setInvoice(null);
       setLines([newPurchaseLine()]);
-      setMessage(`Recepción ${data?.code ?? ""} registrada y pagada correctamente.`);
+      setMessage(
+        `Recepción ${data?.code ?? ""} registrada y pagada correctamente.`,
+      );
       await Promise.all([load(), onCompleted()]);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo registrar la compra.");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo registrar la compra.",
+      );
     } finally {
       setSaving(false);
     }
@@ -1751,29 +2569,306 @@ function LegacyPurchaseCenter({
   return (
     <div className="content purchases-page">
       <section className="purchases-hero">
-        <div><p className="eyebrow">ABASTECIMIENTO Y TESORERÍA</p><h2>Compras y recepción por lote</h2><p>Registra una llegada completa, su factura y el pago inmediato. El stock entra directamente a <strong>{locationName}</strong>.</p></div>
-        <div className="purchase-total"><span>Total de la recepción</span><strong>{money.format(total)}</strong><small>Sin crédito a proveedores</small></div>
+        <div>
+          <p className="eyebrow">ABASTECIMIENTO Y TESORERÍA</p>
+          <h2>Compras y recepción por lote</h2>
+          <p>
+            Registra una llegada completa, su factura y el pago inmediato. El
+            stock entra directamente a <strong>{locationName}</strong>.
+          </p>
+        </div>
+        <div className="purchase-total">
+          <span>Total de la recepción</span>
+          <strong>{money.format(total)}</strong>
+          <small>Sin crédito a proveedores</small>
+        </div>
       </section>
       <form className="purchase-form" id="new-purchase" onSubmit={savePurchase}>
         <section className="card purchase-header-card">
-          <div className="card-head"><div><p className="eyebrow">01 · DOCUMENTO Y PAGO</p><h3>Datos de la llegada</h3></div><span className="badge success">Pago inmediato</span></div>
-          <div className="purchase-fields">
-            <label>Proveedor<select value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required><option value="">Selecciona un proveedor</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.ruc ? ` · RUC ${supplier.ruc}` : ""}</option>)}</select></label>
-            <label>Factura o guía<input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value)} required placeholder="Ej. F001-000245" /></label>
-            <label>Origen del pago<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="bank_transfer">Transferencia bancaria · tesorería central</option><option value="yape_plin">Yape / Plin · tesorería central</option><option value="cash_box">Efectivo · caja de esta sede</option><option value="central_cash">Efectivo · caja central</option></select></label>
-            <label>Factura o comprobante<input type="file" accept="image/*,.pdf" onChange={(event) => setInvoice(event.target.files?.[0] ?? null)} /><small>Opcional: imagen o PDF.</small></label>
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">01 · DOCUMENTO Y PAGO</p>
+              <h3>Datos de la llegada</h3>
+            </div>
+            <span className="badge success">Pago inmediato</span>
           </div>
-          {(paymentMethod === "cash_box" || paymentMethod === "central_cash") && !cashOpen && <p className="cash-required"><strong>La caja está cerrada.</strong> Abre tu caja antes de pagar esta recepción en efectivo.</p>}
-          {paymentMethod === "central_cash" && <p className="purchase-tip">Para usar efectivo central, selecciona primero <strong>Almacén Central</strong> como sede activa.</p>}
+          <div className="purchase-fields">
+            <label>
+              Proveedor
+              <select
+                value={supplierId}
+                onChange={(event) => setSupplierId(event.target.value)}
+                required
+              >
+                <option value="">Selecciona un proveedor</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                    {supplier.ruc ? ` · RUC ${supplier.ruc}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Factura o guía
+              <input
+                value={receiptNumber}
+                onChange={(event) => setReceiptNumber(event.target.value)}
+                required
+                placeholder="Ej. F001-000245"
+              />
+            </label>
+            <label>
+              Origen del pago
+              <select
+                value={paymentMethod}
+                onChange={(event) => setPaymentMethod(event.target.value)}
+              >
+                <option value="bank_transfer">
+                  Transferencia bancaria · tesorería central
+                </option>
+                <option value="yape_plin">
+                  Yape / Plin · tesorería central
+                </option>
+                <option value="cash_box">Efectivo · caja de esta sede</option>
+                <option value="central_cash">Efectivo · caja central</option>
+              </select>
+            </label>
+            <label>
+              Factura o comprobante
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(event) =>
+                  setInvoice(event.target.files?.[0] ?? null)
+                }
+              />
+              <small>Opcional: imagen o PDF.</small>
+            </label>
+          </div>
+          {(paymentMethod === "cash_box" || paymentMethod === "central_cash") &&
+            !cashOpen && (
+              <p className="cash-required">
+                <strong>La caja está cerrada.</strong> Abre tu caja antes de
+                pagar esta recepción en efectivo.
+              </p>
+            )}
+          {paymentMethod === "central_cash" && (
+            <p className="purchase-tip">
+              Para usar efectivo central, selecciona primero{" "}
+              <strong>Almacén Central</strong> como sede activa.
+            </p>
+          )}
         </section>
         <section className="card purchase-lines-card">
-          <div className="card-head"><div><p className="eyebrow">02 · PRODUCTOS DEL LOTE</p><h3>Mercadería recibida</h3><p>Para cargadores usa cantidad. Para celulares, registra un IMEI o serie por cada unidad.</p></div><button type="button" className="secondary" onClick={() => setLines((current) => [...current, newPurchaseLine()])}>＋ Agregar producto</button></div>
-          <div className="purchase-lines">{lines.map((line, index) => <article key={index} className="purchase-line"><div className="line-title"><strong>Producto {String(index + 1).padStart(2, "0")}</strong>{lines.length > 1 && <button type="button" className="text-button danger" onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}>Quitar</button>}</div><div className="purchase-line-grid"><label>SKU<input value={line.sku} onChange={(event) => updateLine(index, "sku", event.target.value)} placeholder="Ej. APP-CHG-20W" required /></label><label>Producto<input value={line.name} onChange={(event) => updateLine(index, "name", event.target.value)} placeholder="Ej. Cargador USB-C 20W" required /></label><label>Tipo<select value={line.category} onChange={(event) => updateLine(index, "category", event.target.value as PurchaseLine["category"])}><option value="accessory">Accesorio / cargador</option><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>Cantidad<input type="number" min="1" value={line.quantity} onChange={(event) => updateLine(index, "quantity", Math.max(1, Number(event.target.value)))} required /></label><label>Costo unitario<input type="number" min="0" step="0.01" value={line.unit_cost} onChange={(event) => updateLine(index, "unit_cost", event.target.value === "" ? "" : Number(event.target.value))} required /></label><label>Precio de venta<input type="number" min="0" step="0.01" value={line.sale_price} onChange={(event) => updateLine(index, "sale_price", event.target.value === "" ? "" : Number(event.target.value))} required /></label></div>{line.category !== "accessory" && <label className="identifiers-field">IMEI o serie <textarea value={line.identifiers} onChange={(event) => updateLine(index, "identifiers", event.target.value)} required placeholder="Uno por línea o separado por comas. Debe coincidir con la cantidad." /></label>}<div className="line-subtotal">Subtotal de línea <strong>{money.format(Number(line.quantity || 0) * Number(line.unit_cost || 0))}</strong></div></article>)}</div>
-          <div className="purchase-submit"><div><span>Total pagado al proveedor</span><strong>{money.format(total)}</strong></div><button className="primary" type="submit" disabled={saving || !total}>{saving ? "Registrando recepción..." : "Confirmar recepción y pago"}</button></div>
-          {message && <p className="users-message" role="status">{message}</p>}
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">02 · PRODUCTOS DEL LOTE</p>
+              <h3>Mercadería recibida</h3>
+              <p>
+                Para cargadores usa cantidad. Para celulares, registra un IMEI o
+                serie por cada unidad.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() =>
+                setLines((current) => [...current, newPurchaseLine()])
+              }
+            >
+              ＋ Agregar producto
+            </button>
+          </div>
+          <div className="purchase-lines">
+            {lines.map((line, index) => (
+              <article key={index} className="purchase-line">
+                <div className="line-title">
+                  <strong>Producto {String(index + 1).padStart(2, "0")}</strong>
+                  {lines.length > 1 && (
+                    <button
+                      type="button"
+                      className="text-button danger"
+                      onClick={() =>
+                        setLines((current) =>
+                          current.filter((_, lineIndex) => lineIndex !== index),
+                        )
+                      }
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+                <div className="purchase-line-grid">
+                  <label>
+                    SKU
+                    <input
+                      value={line.sku}
+                      onChange={(event) =>
+                        updateLine(index, "sku", event.target.value)
+                      }
+                      placeholder="Ej. APP-CHG-20W"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Producto
+                    <input
+                      value={line.name}
+                      onChange={(event) =>
+                        updateLine(index, "name", event.target.value)
+                      }
+                      placeholder="Ej. Cargador USB-C 20W"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Tipo
+                    <select
+                      value={line.category}
+                      onChange={(event) =>
+                        updateLine(
+                          index,
+                          "category",
+                          event.target.value as PurchaseLine["category"],
+                        )
+                      }
+                    >
+                      <option value="accessory">Accesorio / cargador</option>
+                      <option value="phone">Celular</option>
+                      <option value="laptop">Laptop</option>
+                      <option value="tablet">Tablet</option>
+                    </select>
+                  </label>
+                  <label>
+                    Cantidad
+                    <input
+                      type="number"
+                      min="1"
+                      value={line.quantity}
+                      onChange={(event) =>
+                        updateLine(
+                          index,
+                          "quantity",
+                          Math.max(1, Number(event.target.value)),
+                        )
+                      }
+                      required
+                    />
+                  </label>
+                  <label>
+                    Costo unitario
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.unit_cost}
+                      onChange={(event) =>
+                        updateLine(
+                          index,
+                          "unit_cost",
+                          event.target.value === ""
+                            ? ""
+                            : Number(event.target.value),
+                        )
+                      }
+                      required
+                    />
+                  </label>
+                  <label>
+                    Precio de venta
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.sale_price}
+                      onChange={(event) =>
+                        updateLine(
+                          index,
+                          "sale_price",
+                          event.target.value === ""
+                            ? ""
+                            : Number(event.target.value),
+                        )
+                      }
+                      required
+                    />
+                  </label>
+                </div>
+                {line.category !== "accessory" && (
+                  <label className="identifiers-field">
+                    IMEI o serie{" "}
+                    <textarea
+                      value={line.identifiers}
+                      onChange={(event) =>
+                        updateLine(index, "identifiers", event.target.value)
+                      }
+                      required
+                      placeholder="Uno por línea o separado por comas. Debe coincidir con la cantidad."
+                    />
+                  </label>
+                )}
+                <div className="line-subtotal">
+                  Subtotal de línea{" "}
+                  <strong>
+                    {money.format(
+                      Number(line.quantity || 0) * Number(line.unit_cost || 0),
+                    )}
+                  </strong>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="purchase-submit">
+            <div>
+              <span>Total pagado al proveedor</span>
+              <strong>{money.format(total)}</strong>
+            </div>
+            <button
+              className="primary"
+              type="submit"
+              disabled={saving || !total}
+            >
+              {saving
+                ? "Registrando recepción..."
+                : "Confirmar recepción y pago"}
+            </button>
+          </div>
+          {message && (
+            <p className="users-message" role="status">
+              {message}
+            </p>
+          )}
         </section>
       </form>
-      <section className="card recent-lots"><div className="card-head"><div><p className="eyebrow">HISTORIAL DE LA SEDE</p><h3>Últimas recepciones</h3></div><span className="badge neutral">{recentLots.length} recientes</span></div>{recentLots.length ? <div className="cash-list">{recentLots.map((lot) => <article key={lot.id}><div><strong>{lot.code}</strong><small>{lot.suppliers?.[0]?.name ?? "Proveedor"} · Factura {lot.receipt_number ?? "sin número"} · {new Date(lot.created_at).toLocaleDateString("es-PE")}</small></div><b>{money.format(Number(lot.total_cost))}</b></article>)}</div> : <p className="empty">Aún no hay lotes registrados para esta sede.</p>}</section>
+      <section className="card recent-lots">
+        <div className="card-head">
+          <div>
+            <p className="eyebrow">HISTORIAL DE LA SEDE</p>
+            <h3>Últimas recepciones</h3>
+          </div>
+          <span className="badge neutral">{recentLots.length} recientes</span>
+        </div>
+        {recentLots.length ? (
+          <div className="cash-list">
+            {recentLots.map((lot) => (
+              <article key={lot.id}>
+                <div>
+                  <strong>{lot.code}</strong>
+                  <small>
+                    {lot.suppliers?.[0]?.name ?? "Proveedor"} · Factura{" "}
+                    {lot.receipt_number ?? "sin número"} ·{" "}
+                    {new Date(lot.created_at).toLocaleDateString("es-PE")}
+                  </small>
+                </div>
+                <b>{money.format(Number(lot.total_cost))}</b>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">Aún no hay lotes registrados para esta sede.</p>
+        )}
+      </section>
     </div>
   );
 }
@@ -1796,8 +2891,22 @@ function CashCenter({
   const load = useCallback(async () => {
     if (!supabase || !actor) return;
     const [sessionResult, expenseResult] = await Promise.all([
-      supabase.from("cash_sessions").select("id, opened_by, opening_cash, opened_at, closed_at, counted_cash, note").eq("location_id", actor.locationId).order("opened_at", { ascending: false }).limit(8),
-      supabase.from("expenses").select("id, category, description, amount, payment_method, expense_date").eq("location_id", actor.locationId).order("expense_date", { ascending: false }).limit(8),
+      supabase
+        .from("cash_sessions")
+        .select(
+          "id, opened_by, opening_cash, opened_at, closed_at, counted_cash, note",
+        )
+        .eq("location_id", actor.locationId)
+        .order("opened_at", { ascending: false })
+        .limit(8),
+      supabase
+        .from("expenses")
+        .select(
+          "id, category, description, amount, payment_method, expense_date",
+        )
+        .eq("location_id", actor.locationId)
+        .order("expense_date", { ascending: false })
+        .limit(8),
     ]);
     if (sessionResult.error || expenseResult.error) {
       setMessage("No se pudo cargar el detalle de caja.");
@@ -1840,13 +2949,18 @@ function CashCenter({
   const closeCash = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !activeSession) return;
-    const counted = Number(new FormData(event.currentTarget).get("counted_cash") ?? 0);
+    const counted = Number(
+      new FormData(event.currentTarget).get("counted_cash") ?? 0,
+    );
     setSaving(true);
-    const result = await supabase.from("cash_sessions").update({
-      closed_at: new Date().toISOString(),
-      counted_cash: counted,
-      approved_by: actor.id,
-    }).eq("id", activeSession.id);
+    const result = await supabase
+      .from("cash_sessions")
+      .update({
+        closed_at: new Date().toISOString(),
+        counted_cash: counted,
+        approved_by: actor.id,
+      })
+      .eq("id", activeSession.id);
     setSaving(false);
     if (result.error) return setMessage(result.error.message);
     setMessage("Caja cerrada correctamente.");
@@ -1866,7 +2980,9 @@ function CashCenter({
       description: String(form.get("description") ?? "").trim(),
       amount: Number(form.get("amount") ?? 0),
       payment_method: String(form.get("payment_method") ?? "Efectivo"),
-      expense_date: String(form.get("expense_date") ?? new Date().toISOString().slice(0, 10)),
+      expense_date: String(
+        form.get("expense_date") ?? new Date().toISOString().slice(0, 10),
+      ),
     });
     setSaving(false);
     if (result.error) return setMessage(result.error.message);
@@ -1880,60 +2996,211 @@ function CashCenter({
       <section className="cash-banner">
         <div>
           <p className="eyebrow">CAJA DE LA SEDE</p>
-          <h2>{activeSession ? "Caja abierta" : "Caja pendiente de apertura"}</h2>
-          <p>{activeSession ? `Tu caja está abierta desde ${new Date(activeSession.opened_at).toLocaleString("es-PE")}.` : "Debes abrir tu propia caja antes de registrar una venta."}</p>
+          <h2>
+            {activeSession ? "Caja abierta" : "Caja pendiente de apertura"}
+          </h2>
+          <p>
+            {activeSession
+              ? `Tu caja está abierta desde ${new Date(activeSession.opened_at).toLocaleString("es-PE")}.`
+              : "Debes abrir tu propia caja antes de registrar una venta."}
+          </p>
         </div>
-        <span className={activeSession ? "badge success" : "badge warning"}>{activeSession ? "Activa" : "Sin abrir"}</span>
+        <span className={activeSession ? "badge success" : "badge warning"}>
+          {activeSession ? "Activa" : "Sin abrir"}
+        </span>
       </section>
       <div className="metrics">
-        <Metric label="Ventas del día" value={money.format(metrics.sales)} note={`${metrics.salesCount} confirmadas`} />
-        <Metric label="Gastos del día" value={money.format(metrics.expenses)} note="Egresos registrados" />
-        <Metric label="Resultado operativo" value={money.format(metrics.operational)} note="Antes del arqueo" />
-        <Metric label="Fondo inicial" value={money.format(Number(activeSession?.opening_cash ?? 0))} note={activeSession ? "Caja activa" : "Sin sesión"} />
+        <Metric
+          label="Ventas del día"
+          value={money.format(metrics.sales)}
+          note={`${metrics.salesCount} confirmadas`}
+        />
+        <Metric
+          label="Gastos del día"
+          value={money.format(metrics.expenses)}
+          note="Egresos registrados"
+        />
+        <Metric
+          label="Resultado operativo"
+          value={money.format(metrics.operational)}
+          note="Antes del arqueo"
+        />
+        <Metric
+          label="Fondo inicial"
+          value={money.format(Number(activeSession?.opening_cash ?? 0))}
+          note={activeSession ? "Caja activa" : "Sin sesión"}
+        />
       </div>
       <div className="cash-grid">
         <section className="card">
-          <div className="card-head"><div><p className="eyebrow">CONTROL DE SESIÓN</p><h3>{activeSession ? "Cerrar caja" : "Abrir caja"}</h3></div></div>
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">CONTROL DE SESIÓN</p>
+              <h3>{activeSession ? "Cerrar caja" : "Abrir caja"}</h3>
+            </div>
+          </div>
           {activeSession ? (
             <form className="cash-form" onSubmit={closeCash}>
-              <label>Efectivo contado<input name="counted_cash" type="number" min="0" step="0.01" required /></label>
-              <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Cerrar caja"}</button>
+              <label>
+                Efectivo contado
+                <input
+                  name="counted_cash"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                />
+              </label>
+              <button className="primary" disabled={saving}>
+                {saving ? "Guardando..." : "Cerrar caja"}
+              </button>
             </form>
           ) : (
             <form className="cash-form" onSubmit={saveOpening}>
-              <label>Fondo inicial (S/)<input name="opening_cash" type="number" min="0" step="0.01" required /></label>
-              <label>Nota<input name="note" placeholder="Ej. Apertura turno mañana" /></label>
-              <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Abrir caja"}</button>
+              <label>
+                Fondo inicial (S/)
+                <input
+                  name="opening_cash"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                />
+              </label>
+              <label>
+                Nota
+                <input name="note" placeholder="Ej. Apertura turno mañana" />
+              </label>
+              <button className="primary" disabled={saving}>
+                {saving ? "Guardando..." : "Abrir caja"}
+              </button>
             </form>
           )}
-          {message && <p className="users-message" role="status">{message}</p>}
+          {message && (
+            <p className="users-message" role="status">
+              {message}
+            </p>
+          )}
         </section>
         <section className="card">
-          <p className="eyebrow">GASTO OPERATIVO</p><h3>Registrar egreso</h3>
-          {canManageExpenses ? <form className="cash-form" onSubmit={registerExpense}>
-            <div className="two-fields"><label>Categoría<input name="category" defaultValue="Operativo" required /></label><label>Monto (S/)<input name="amount" type="number" min="0.01" step="0.01" required /></label></div>
-            <label>Descripción<input name="description" required placeholder="Ej. Transporte o embalaje" /></label>
-            <div className="two-fields"><label>Método<select name="payment_method"><option>Efectivo</option><option>Yape/Plin</option><option>Transferencia</option></select></label><label>Fecha<input name="expense_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></label></div>
-            <button className="secondary" disabled={saving}>Registrar gasto</button>
-          </form> : <p className="empty">Los gastos los registra un administrador.</p>}
+          <p className="eyebrow">GASTO OPERATIVO</p>
+          <h3>Registrar egreso</h3>
+          {canManageExpenses ? (
+            <form className="cash-form" onSubmit={registerExpense}>
+              <div className="two-fields">
+                <label>
+                  Categoría
+                  <input name="category" defaultValue="Operativo" required />
+                </label>
+                <label>
+                  Monto (S/)
+                  <input
+                    name="amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                  />
+                </label>
+              </div>
+              <label>
+                Descripción
+                <input
+                  name="description"
+                  required
+                  placeholder="Ej. Transporte o embalaje"
+                />
+              </label>
+              <div className="two-fields">
+                <label>
+                  Método
+                  <select name="payment_method">
+                    <option>Efectivo</option>
+                    <option>Yape/Plin</option>
+                    <option>Transferencia</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha
+                  <input
+                    name="expense_date"
+                    type="date"
+                    defaultValue={new Date().toISOString().slice(0, 10)}
+                    required
+                  />
+                </label>
+              </div>
+              <button className="secondary" disabled={saving}>
+                Registrar gasto
+              </button>
+            </form>
+          ) : (
+            <p className="empty">Los gastos los registra un administrador.</p>
+          )}
         </section>
       </div>
       <div className="cash-grid">
-        <section className="card"><p className="eyebrow">ÚLTIMOS EGRESOS</p><h3>Gastos registrados</h3><ExpenseList expenses={expenses} /></section>
-        <section className="card"><p className="eyebrow">HISTORIAL DE CAJA</p><h3>Sesiones recientes</h3><CashSessionList sessions={sessions} /></section>
+        <section className="card">
+          <p className="eyebrow">ÚLTIMOS EGRESOS</p>
+          <h3>Gastos registrados</h3>
+          <ExpenseList expenses={expenses} />
+        </section>
+        <section className="card">
+          <p className="eyebrow">HISTORIAL DE CAJA</p>
+          <h3>Sesiones recientes</h3>
+          <CashSessionList sessions={sessions} />
+        </section>
       </div>
     </div>
   );
 }
 
 function ExpenseList({ expenses }: { expenses: ExpenseRecord[] }) {
-  if (!expenses.length) return <p className="empty">Aún no hay gastos registrados.</p>;
-  return <div className="cash-list">{expenses.map((expense) => <article key={expense.id}><div><strong>{expense.description}</strong><small>{expense.category} · {expense.expense_date} · {expense.payment_method}</small></div><b>- {money.format(Number(expense.amount))}</b></article>)}</div>;
+  if (!expenses.length)
+    return <p className="empty">Aún no hay gastos registrados.</p>;
+  return (
+    <div className="cash-list">
+      {expenses.map((expense) => (
+        <article key={expense.id}>
+          <div>
+            <strong>{expense.description}</strong>
+            <small>
+              {expense.category} · {expense.expense_date} ·{" "}
+              {expense.payment_method}
+            </small>
+          </div>
+          <b>- {money.format(Number(expense.amount))}</b>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 function CashSessionList({ sessions }: { sessions: CashSession[] }) {
-  if (!sessions.length) return <p className="empty">Aún no hay sesiones de caja.</p>;
-  return <div className="cash-list">{sessions.map((session) => <article key={session.id}><div><strong>{session.closed_at ? "Caja cerrada" : "Caja abierta"}</strong><small>{new Date(session.opened_at).toLocaleString("es-PE")}</small></div><div className="cash-session-values"><b>Inicio {money.format(Number(session.opening_cash))}</b>{session.closed_at && <small>Arqueo {money.format(Number(session.counted_cash ?? 0))}</small>}</div></article>)}</div>;
+  if (!sessions.length)
+    return <p className="empty">Aún no hay sesiones de caja.</p>;
+  return (
+    <div className="cash-list">
+      {sessions.map((session) => (
+        <article key={session.id}>
+          <div>
+            <strong>
+              {session.closed_at ? "Caja cerrada" : "Caja abierta"}
+            </strong>
+            <small>{new Date(session.opened_at).toLocaleString("es-PE")}</small>
+          </div>
+          <div className="cash-session-values">
+            <b>Inicio {money.format(Number(session.opening_cash))}</b>
+            {session.closed_at && (
+              <small>
+                Arqueo {money.format(Number(session.counted_cash ?? 0))}
+              </small>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 function CustomerCenter({
@@ -1989,35 +3256,115 @@ function CustomerCenter({
   return (
     <div className="content directory-page">
       <section className="directory-hero">
-        <div><p className="eyebrow">BASE COMERCIAL</p><h2>Clientes</h2><p>Registra personas con DNI y reutiliza sus datos al vender. Si no deseas identificar a la persona, selecciona Cliente general.</p></div>
-        <div className="users-count"><strong>{customers.length}</strong><span>clientes registrados</span></div>
+        <div>
+          <p className="eyebrow">BASE COMERCIAL</p>
+          <h2>Clientes</h2>
+          <p>
+            Registra personas con DNI y reutiliza sus datos al vender. Si no
+            deseas identificar a la persona, selecciona Cliente general.
+          </p>
+        </div>
+        <div className="users-count">
+          <strong>{customers.length}</strong>
+          <span>clientes registrados</span>
+        </div>
       </section>
       <div className="directory-grid">
         <section className="card" id="new-customer">
-          <p className="eyebrow">NUEVO CLIENTE</p><h3>Registrar cliente</h3>
+          <p className="eyebrow">NUEVO CLIENTE</p>
+          <h3>Registrar cliente</h3>
           <form className="directory-form" onSubmit={createCustomer}>
-            <label>Nombre completo<input name="name" required placeholder="Ej. María Pérez" /></label>
-            <div className="two-fields"><label>DNI<input name="dni" inputMode="numeric" maxLength={12} placeholder="Opcional" /></label><label>Teléfono<input name="phone" placeholder="Opcional" /></label></div>
-            <label>Dirección<input name="address" placeholder="Opcional" /></label>
-            <button className="primary" disabled={saving}>{saving ? "Guardando..." : "Guardar cliente"}</button>
+            <label>
+              Nombre completo
+              <input name="name" required placeholder="Ej. María Pérez" />
+            </label>
+            <div className="two-fields">
+              <label>
+                DNI
+                <input
+                  name="dni"
+                  inputMode="numeric"
+                  maxLength={12}
+                  placeholder="Opcional"
+                />
+              </label>
+              <label>
+                Teléfono
+                <input name="phone" placeholder="Opcional" />
+              </label>
+            </div>
+            <label>
+              Dirección
+              <input name="address" placeholder="Opcional" />
+            </label>
+            <button className="primary" disabled={saving}>
+              {saving ? "Guardando..." : "Guardar cliente"}
+            </button>
           </form>
-          {message && <p className="users-message" role="status">{message}</p>}
+          {message && (
+            <p className="users-message" role="status">
+              {message}
+            </p>
+          )}
         </section>
         <section className="card customer-general-card">
-          <p className="eyebrow">VENTA RÁPIDA</p><h3>Cliente general</h3>
-          <p>En una venta puedes dejar el cliente como general. Si luego deseas identificarlo, regístralo aquí y selecciónalo directamente desde la pantalla de venta.</p>
+          <p className="eyebrow">VENTA RÁPIDA</p>
+          <h3>Cliente general</h3>
+          <p>
+            En una venta puedes dejar el cliente como general. Si luego deseas
+            identificarlo, regístralo aquí y selecciónalo directamente desde la
+            pantalla de venta.
+          </p>
           <span className="badge neutral">No requiere DNI</span>
         </section>
       </div>
       <section className="card directory-list-card">
-        <div className="card-head"><div><p className="eyebrow">DIRECTORIO</p><h3>Clientes registrados</h3></div><label className="search directory-search">⌕<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, DNI o teléfono" /></label></div>
-        {visibleCustomers.length ? <div className="directory-list">{visibleCustomers.map((customer) => <article key={customer.id}><span className="user-avatar">{customer.name.slice(0, 2).toUpperCase()}</span><div><strong>{customer.name}</strong><small>{customer.dni ? `DNI ${customer.dni}` : "Sin DNI"}{customer.phone ? ` · ${customer.phone}` : ""}{customer.address ? ` · ${customer.address}` : ""}</small></div><span className="badge success">Activo</span></article>)}</div> : <p className="empty">No se encontraron clientes.</p>}
+        <div className="card-head">
+          <div>
+            <p className="eyebrow">DIRECTORIO</p>
+            <h3>Clientes registrados</h3>
+          </div>
+          <label className="search directory-search">
+            ⌕
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nombre, DNI o teléfono"
+            />
+          </label>
+        </div>
+        {visibleCustomers.length ? (
+          <div className="directory-list">
+            {visibleCustomers.map((customer) => (
+              <article key={customer.id}>
+                <span className="user-avatar">
+                  {customer.name.slice(0, 2).toUpperCase()}
+                </span>
+                <div>
+                  <strong>{customer.name}</strong>
+                  <small>
+                    {customer.dni ? `DNI ${customer.dni}` : "Sin DNI"}
+                    {customer.phone ? ` · ${customer.phone}` : ""}
+                    {customer.address ? ` · ${customer.address}` : ""}
+                  </small>
+                </div>
+                <span className="badge success">Activo</span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">No se encontraron clientes.</p>
+        )}
       </section>
     </div>
   );
 }
 
-function SupplierCenter({ actor }: { actor: { id: string; name: string; role: string; locationId: string } }) {
+function SupplierCenter({
+  actor,
+}: {
+  actor: { id: string; name: string; role: string; locationId: string };
+}) {
   const supabase = getSupabaseBrowser();
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [message, setMessage] = useState("");
@@ -2025,12 +3372,18 @@ function SupplierCenter({ actor }: { actor: { id: string; name: string; role: st
   const canManage = actor.role !== "seller";
   const load = useCallback(async () => {
     if (!supabase) return;
-    const result = await supabase.from("suppliers").select("id, name, ruc, phone, contact, address, active").order("name");
-    if (result.error) return setMessage("No se pudieron cargar los proveedores.");
+    const result = await supabase
+      .from("suppliers")
+      .select("id, name, ruc, phone, contact, address, active")
+      .order("name");
+    if (result.error)
+      return setMessage("No se pudieron cargar los proveedores.");
     setSuppliers(result.data as SupplierRecord[]);
   }, [supabase]);
   useEffect(() => {
-    const loadTimer = window.setTimeout(() => { void load(); }, 0);
+    const loadTimer = window.setTimeout(() => {
+      void load();
+    }, 0);
     return () => window.clearTimeout(loadTimer);
   }, [load]);
   const createSupplier = async (event: FormEvent<HTMLFormElement>) => {
@@ -2054,16 +3407,120 @@ function SupplierCenter({ actor }: { actor: { id: string; name: string; role: st
   };
   return (
     <div className="content directory-page">
-      <section className="directory-hero"><div><p className="eyebrow">COMPRAS Y ABASTECIMIENTO</p><h2>Proveedores</h2><p>Centraliza RUC, contacto y teléfono de quienes abastecen la operación.</p></div><div className="users-count"><strong>{suppliers.filter((item) => item.active).length}</strong><span>proveedores activos</span></div></section>
+      <section className="directory-hero">
+        <div>
+          <p className="eyebrow">COMPRAS Y ABASTECIMIENTO</p>
+          <h2>Proveedores</h2>
+          <p>
+            Centraliza RUC, contacto y teléfono de quienes abastecen la
+            operación.
+          </p>
+        </div>
+        <div className="users-count">
+          <strong>{suppliers.filter((item) => item.active).length}</strong>
+          <span>proveedores activos</span>
+        </div>
+      </section>
       <div className="directory-grid">
-        <section className="card" id="new-supplier"><p className="eyebrow">NUEVO PROVEEDOR</p><h3>Registrar proveedor</h3>
-          {canManage ? <form className="directory-form" onSubmit={createSupplier}><label>Razón social o nombre<input name="name" required placeholder="Ej. Distribuidora Lima SAC" /></label><div className="two-fields"><label>RUC<input name="ruc" inputMode="numeric" maxLength={16} placeholder="Opcional" /></label><label>Teléfono<input name="phone" placeholder="Opcional" /></label></div><label>Contacto<input name="contact" placeholder="Ej. Luis Torres" /></label><label>Dirección<input name="address" placeholder="Opcional" /></label><button className="primary" disabled={saving}>{saving ? "Guardando..." : "Guardar proveedor"}</button></form> : <p className="empty">El vendedor puede consultar proveedores; el registro es administrativo.</p>}
-          {message && <p className="users-message" role="status">{message}</p>}
+        <section className="card" id="new-supplier">
+          <p className="eyebrow">NUEVO PROVEEDOR</p>
+          <h3>Registrar proveedor</h3>
+          {canManage ? (
+            <form className="directory-form" onSubmit={createSupplier}>
+              <label>
+                Razón social o nombre
+                <input
+                  name="name"
+                  required
+                  placeholder="Ej. Distribuidora Lima SAC"
+                />
+              </label>
+              <div className="two-fields">
+                <label>
+                  RUC
+                  <input
+                    name="ruc"
+                    inputMode="numeric"
+                    maxLength={16}
+                    placeholder="Opcional"
+                  />
+                </label>
+                <label>
+                  Teléfono
+                  <input name="phone" placeholder="Opcional" />
+                </label>
+              </div>
+              <label>
+                Contacto
+                <input name="contact" placeholder="Ej. Luis Torres" />
+              </label>
+              <label>
+                Dirección
+                <input name="address" placeholder="Opcional" />
+              </label>
+              <button className="primary" disabled={saving}>
+                {saving ? "Guardando..." : "Guardar proveedor"}
+              </button>
+            </form>
+          ) : (
+            <p className="empty">
+              El vendedor puede consultar proveedores; el registro es
+              administrativo.
+            </p>
+          )}
+          {message && (
+            <p className="users-message" role="status">
+              {message}
+            </p>
+          )}
         </section>
-        <section className="card customer-general-card"><p className="eyebrow">SIGUIENTE PASO</p><h3>Ingreso de mercadería</h3><p>Los proveedores registrados estarán disponibles para asociar nuevos lotes y compras de inventario.</p><span className="badge neutral">Control administrativo</span></section>
+        <section className="card customer-general-card">
+          <p className="eyebrow">SIGUIENTE PASO</p>
+          <h3>Ingreso de mercadería</h3>
+          <p>
+            Los proveedores registrados estarán disponibles para asociar nuevos
+            lotes y compras de inventario.
+          </p>
+          <span className="badge neutral">Control administrativo</span>
+        </section>
       </div>
-      <section className="card directory-list-card"><div className="card-head"><div><p className="eyebrow">DIRECTORIO</p><h3>Proveedores registrados</h3></div><span className="badge success">{suppliers.length} registrados</span></div>
-        {suppliers.length ? <div className="directory-list">{suppliers.map((supplier) => <article key={supplier.id}><span className="user-avatar">{supplier.name.slice(0, 2).toUpperCase()}</span><div><strong>{supplier.name}</strong><small>{supplier.ruc ? `RUC ${supplier.ruc}` : "Sin RUC"}{supplier.contact ? ` · ${supplier.contact}` : ""}{supplier.phone ? ` · ${supplier.phone}` : ""}{supplier.address ? ` · ${supplier.address}` : ""}</small></div><span className={supplier.active ? "badge success" : "badge warning"}>{supplier.active ? "Activo" : "Inactivo"}</span></article>)}</div> : <p className="empty">Aún no hay proveedores registrados.</p>}
+      <section className="card directory-list-card">
+        <div className="card-head">
+          <div>
+            <p className="eyebrow">DIRECTORIO</p>
+            <h3>Proveedores registrados</h3>
+          </div>
+          <span className="badge success">{suppliers.length} registrados</span>
+        </div>
+        {suppliers.length ? (
+          <div className="directory-list">
+            {suppliers.map((supplier) => (
+              <article key={supplier.id}>
+                <span className="user-avatar">
+                  {supplier.name.slice(0, 2).toUpperCase()}
+                </span>
+                <div>
+                  <strong>{supplier.name}</strong>
+                  <small>
+                    {supplier.ruc ? `RUC ${supplier.ruc}` : "Sin RUC"}
+                    {supplier.contact ? ` · ${supplier.contact}` : ""}
+                    {supplier.phone ? ` · ${supplier.phone}` : ""}
+                    {supplier.address ? ` · ${supplier.address}` : ""}
+                  </small>
+                </div>
+                <span
+                  className={
+                    supplier.active ? "badge success" : "badge warning"
+                  }
+                >
+                  {supplier.active ? "Activo" : "Inactivo"}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">Aún no hay proveedores registrados.</p>
+        )}
       </section>
     </div>
   );
@@ -2118,11 +3575,17 @@ function QuickGuide({
             ],
           };
   if (role === "seller") {
-    guide.steps.unshift("Abre tu caja antes de iniciar ventas; THOR bloqueará la venta si no está abierta.");
+    guide.steps.unshift(
+      "Abre tu caja antes de iniciar ventas; THOR bloqueará la venta si no está abierta.",
+    );
   } else if (role === "admin") {
-    guide.steps.unshift("Selecciona la sede operativa en el menú lateral para gestionar cada almacén.");
+    guide.steps.unshift(
+      "Selecciona la sede operativa en el menú lateral para gestionar cada almacén.",
+    );
   } else {
-    guide.steps.unshift("Crea administradores y revisa que cada vendedor tenga una sede correctamente asignada.");
+    guide.steps.unshift(
+      "Crea administradores y revisa que cada vendedor tenga una sede correctamente asignada.",
+    );
   }
   return (
     <section className="quick-guide" aria-labelledby="quick-guide-title">
@@ -2334,8 +3797,8 @@ function UserCenter({
             <li>La persona ingresa con las credenciales que le entregues.</li>
           </ol>
           <p>
-            El Superusuario crea administradores. El Administrador general
-            puede crear vendedores para cualquier almacén, pero no eleva roles.
+            El Superusuario crea administradores. El Administrador general puede
+            crear vendedores para cualquier almacén, pero no eleva roles.
           </p>
         </section>
       </div>
@@ -2441,19 +3904,95 @@ function SuperAdminActivity() {
         <div>
           <p className="eyebrow">SUPERVISIÓN EXCLUSIVA</p>
           <h3>Actividad de THOR</h3>
-          <p>Solo el Superadministrador puede ver quién está conectado y las acciones registradas.</p>
+          <p>
+            Solo el Superadministrador puede ver quién está conectado y las
+            acciones registradas.
+          </p>
         </div>
-        <button className="secondary" onClick={() => void load()}>Actualizar</button>
+        <button className="secondary" onClick={() => void load()}>
+          Actualizar
+        </button>
       </div>
-      {message && <p className="users-message" role="status">{message}</p>}
+      {message && (
+        <p className="users-message" role="status">
+          {message}
+        </p>
+      )}
       <div className="activity-grid">
         <section className="card activity-card">
-          <div className="card-head"><div><p className="eyebrow">USUARIOS CONECTADOS</p><h3>{activeUsers.length} en línea</h3></div><span className="connection-pill"><i /> En tiempo real</span></div>
-          {activeUsers.length ? <div className="activity-users">{activeUsers.map((user) => <article key={`${user.user_id}-${user.signed_in_at}`}><span className="user-avatar">{user.name.slice(0, 2).toUpperCase()}</span><div><strong>{user.name}</strong><small>{roleName(user.role)} · {user.location_name ?? "Sin sede"}</small><small>Activo {timeSince(user.signed_in_at, now)} · última señal {timeSince(user.last_seen_at, now)}</small></div><span className="badge success">Conectado</span></article>)}</div> : <p className="empty">No hay usuarios con actividad en los últimos 3 minutos.</p>}
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">USUARIOS CONECTADOS</p>
+              <h3>{activeUsers.length} en línea</h3>
+            </div>
+            <span className="connection-pill">
+              <i /> En tiempo real
+            </span>
+          </div>
+          {activeUsers.length ? (
+            <div className="activity-users">
+              {activeUsers.map((user) => (
+                <article key={`${user.user_id}-${user.signed_in_at}`}>
+                  <span className="user-avatar">
+                    {user.name.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div>
+                    <strong>{user.name}</strong>
+                    <small>
+                      {roleName(user.role)} · {user.location_name ?? "Sin sede"}
+                    </small>
+                    <small>
+                      Activo {timeSince(user.signed_in_at, now)} · última señal{" "}
+                      {timeSince(user.last_seen_at, now)}
+                    </small>
+                  </div>
+                  <span className="badge success">Conectado</span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">
+              No hay usuarios con actividad en los últimos 3 minutos.
+            </p>
+          )}
         </section>
         <section className="card activity-card audit-card">
-          <div className="card-head"><div><p className="eyebrow">BITÁCORA DE ACCIONES</p><h3>Últimos movimientos</h3></div><span className="badge neutral">{auditEntries.length} registros</span></div>
-          {auditEntries.length ? <div className="audit-list">{auditEntries.map((entry) => <article key={entry.id}><span className="audit-dot" /><div><strong>{auditLabel(entry.action)}</strong><small>{entry.actor_name ?? "Sistema"} · {roleName(entry.actor_role ?? "")}</small><small>{new Date(entry.created_at).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}{entry.detail?.code ? ` · ${String(entry.detail.code)}` : ""}</small></div></article>)}</div> : <p className="empty">Aún no hay movimientos en la bitácora.</p>}
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">BITÁCORA DE ACCIONES</p>
+              <h3>Últimos movimientos</h3>
+            </div>
+            <span className="badge neutral">
+              {auditEntries.length} registros
+            </span>
+          </div>
+          {auditEntries.length ? (
+            <div className="audit-list">
+              {auditEntries.map((entry) => (
+                <article key={entry.id}>
+                  <span className="audit-dot" />
+                  <div>
+                    <strong>{auditLabel(entry.action)}</strong>
+                    <small>
+                      {entry.actor_name ?? "Sistema"} ·{" "}
+                      {roleName(entry.actor_role ?? "")}
+                    </small>
+                    <small>
+                      {new Date(entry.created_at).toLocaleString("es-PE", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                      {entry.detail?.code
+                        ? ` · ${String(entry.detail.code)}`
+                        : ""}
+                    </small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">Aún no hay movimientos en la bitácora.</p>
+          )}
         </section>
       </div>
     </section>
@@ -2461,7 +4000,13 @@ function SuperAdminActivity() {
 }
 
 function roleName(role: string) {
-  return role === "superadmin" ? "Superadministrador" : role === "admin" ? "Administrador" : role === "seller" ? "Vendedor" : "Sistema";
+  return role === "superadmin"
+    ? "Superadministrador"
+    : role === "admin"
+      ? "Administrador"
+      : role === "seller"
+        ? "Vendedor"
+        : "Sistema";
 }
 
 function auditLabel(action: string) {
@@ -2475,7 +4020,10 @@ function auditLabel(action: string) {
 }
 
 function timeSince(value: string, now: number) {
-  const seconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000));
+  const seconds = Math.max(
+    0,
+    Math.floor((now - new Date(value).getTime()) / 1000),
+  );
   if (seconds < 60) return "hace instantes";
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `hace ${minutes} min`;
@@ -2501,7 +4049,11 @@ function UserAvatar({ user }: { user: ManagedUser }) {
   }, [supabase, user.avatar_path]);
   return (
     <span className="user-avatar">
-      {user.avatar_path && url ? <img src={url} alt={`Foto de ${user.name}`} /> : user.name.slice(0, 2).toUpperCase()}
+      {user.avatar_path && url ? (
+        <img src={url} alt={`Foto de ${user.name}`} />
+      ) : (
+        user.name.slice(0, 2).toUpperCase()
+      )}
     </span>
   );
 }
@@ -2551,7 +4103,7 @@ function ManualCenter({
   const modules = [
     [
       "Inventario",
-      "Registrar, consultar y vender equipos o accesorios disponibles.",
+      "Consulta existencias por sede. Los ingresos se realizan únicamente desde Compras por lote.",
       "Activo",
     ],
     [
@@ -2576,6 +4128,11 @@ function ManualCenter({
     "Activo",
   ]);
   modules.push(
+    [
+      "Catálogo",
+      "Crea primero marca, modelo y capacidad o potencia; después usa la referencia en Compras para evitar duplicados.",
+      "Activo",
+    ],
     [
       "Clientes",
       "Registra clientes con DNI, contacto y dirección o usa Cliente General para ventas rápidas.",
@@ -2655,7 +4212,11 @@ function ManualCenter({
       <section className="manual-benefits">
         <p className="eyebrow">BENEFICIOS Y CONTROLES</p>
         <h3>Lo que este acceso te permite hacer</h3>
-        <ul>{benefits.map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>
+        <ul>
+          {benefits.map((benefit) => (
+            <li key={benefit}>{benefit}</li>
+          ))}
+        </ul>
       </section>
       <section className="manuals-section">
         <div className="section-heading">
