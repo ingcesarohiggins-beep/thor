@@ -35,6 +35,12 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 2. Cada sesión se cierra automáticamente después de 15 minutos sin actividad; THOR muestra un aviso a los 13 minutos.
 3. Cada usuario puede hacer clic en sus iniciales, al pie del menú lateral, para cargar o reemplazar su foto de perfil. La imagen queda privada en el bucket `thor-files`.
 
+## Supervisión exclusiva del Superadministrador
+
+1. Ejecuta `migrations/202608130010_superadmin_activity_log.sql` después de todas las migraciones anteriores.
+2. La etiqueta verde **Conectado** en el menú lateral confirma que THOR está conectado a Supabase sin ocupar el área principal.
+3. En **Usuarios**, el Superadministrador verá usuarios conectados, tiempo desde el inicio de actividad, última señal y una bitácora. Administradores y vendedores no pueden consultar esos datos.
+
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.

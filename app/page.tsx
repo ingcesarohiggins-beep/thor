@@ -92,6 +92,24 @@ type ManagedUser = {
   locations: { name: string }[];
 };
 type LocationOption = { id: string; name: string };
+type ActiveUser = {
+  user_id: string;
+  name: string;
+  role: string;
+  location_name: string | null;
+  signed_in_at: string;
+  last_seen_at: string;
+  last_action: string;
+};
+type AuditEntry = {
+  id: string;
+  action: string;
+  entity_type: string;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+  actor_name: string | null;
+  actor_role: string | null;
+};
 
 const money = new Intl.NumberFormat("es-PE", {
   style: "currency",
@@ -103,9 +121,7 @@ const newPayment = (): Payment => ({ method: "Efectivo", amount: "" });
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("inicio");
-  const [notice, setNotice] = useState(
-    "Conecta tu cuenta de THOR para comenzar.",
-  );
+  const [notice, setNotice] = useState("");
   const [stock, setStock] = useState<StockItem[]>([]);
   const [metrics, setMetrics] = useState<Metrics>({
     sales: 0,
@@ -129,6 +145,7 @@ export default function Home() {
   const [payments, setPayments] = useState<Payment[]>([newPayment()]);
   const [savingSale, setSavingSale] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [activitySessionKey] = useState(() => crypto.randomUUID());
   const [actor, setActor] = useState<{
     id: string;
     name: string;
@@ -170,11 +187,17 @@ export default function Home() {
       setIdleWarning(false);
       warningTimer = window.setTimeout(() => setIdleWarning(true), warningMs);
       signOutTimer = window.setTimeout(() => {
-        void supabase.auth.signOut().then(() => {
-          setToken(null);
-          setIdleWarning(false);
-          setNotice("La sesión se cerró tras 15 minutos sin actividad.");
-        });
+        void supabase
+          .rpc("end_thor_activity", {
+            p_session_key: activitySessionKey,
+            p_reason: "session.inactive_timeout",
+          })
+          .then(() => supabase.auth.signOut())
+          .then(() => {
+            setToken(null);
+            setIdleWarning(false);
+            setNotice("La sesión se cerró tras 15 minutos sin actividad.");
+          });
       }, idleMs);
     };
     const events: Array<keyof WindowEventMap> = [
@@ -191,7 +214,7 @@ export default function Home() {
       if (warningTimer) window.clearTimeout(warningTimer);
       if (signOutTimer) window.clearTimeout(signOutTimer);
     };
-  }, [supabase, token]);
+  }, [activitySessionKey, supabase, token]);
 
   useEffect(() => {
     if (!supabase || !actor?.avatarPath) return;
@@ -228,6 +251,28 @@ export default function Home() {
       active = false;
     };
   }, [actor?.id, supabase]);
+
+  useEffect(() => {
+    const actorId = actor?.id;
+    if (!supabase || !token || !actorId) return;
+    const touch = () =>
+      supabase.rpc("touch_thor_activity", {
+        p_session_key: activitySessionKey,
+        p_action: "session.active",
+      });
+    void touch();
+    const heartbeat = window.setInterval(() => {
+      void touch();
+    }, 60_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void touch();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(heartbeat);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [activitySessionKey, actor?.id, supabase, token]);
 
   const refresh = async (requestedLocationId?: string) => {
     if (!supabase || !token) return;
@@ -379,7 +424,7 @@ export default function Home() {
       salesCount: (sales.data ?? []).length,
       operational: salesTotal - expensesTotal,
     });
-    setNotice("THOR conectado a Supabase. Operación lista.");
+    setNotice("");
   };
 
   // The delayed refresh reads the current Supabase session after authentication settles.
@@ -621,6 +666,10 @@ export default function Home() {
 
   const signOut = async () => {
     if (!supabase) return;
+    await supabase.rpc("end_thor_activity", {
+      p_session_key: activitySessionKey,
+      p_reason: "session.signed_out",
+    });
     await supabase.auth.signOut();
     setToken(null);
     setActor(null);
@@ -780,6 +829,9 @@ export default function Home() {
             <span className="sign-out-label">Salir</span>
           </button>
         </div>
+        <div className="connection-status" role="status" title="THOR conectado a Supabase">
+          <span aria-hidden="true">●</span> Conectado
+        </div>
       </aside>
       <section className="workspace">
         {idleWarning && (
@@ -800,10 +852,12 @@ export default function Home() {
             ＋ {newRecordLabel}
           </button>
         </header>
-        <div className="notice" role="status">
-          <span>✓</span>
-          {notice}
-        </div>
+        {notice && (
+          <div className="notice" role="status">
+            <span>✓</span>
+            {notice}
+          </div>
+        )}
         {section === "inicio" && (
           <div className="content">
             <section className="hero dashboard-hero">
@@ -1787,6 +1841,13 @@ function UserCenter({
       .eq("id", userId);
     setSavingId(null);
     if (result.error) return setMessage(result.error.message);
+    await supabase.from("audit_log").insert({
+      actor_id: actor.id,
+      action: "user.role_changed",
+      entity_type: "app_user",
+      entity_id: userId,
+      detail: { role },
+    });
     setMessage("Rol actualizado correctamente.");
     await loadUsers();
   };
@@ -1958,8 +2019,93 @@ function UserCenter({
           <p className="empty">Aun no hay usuarios cargados.</p>
         )}
       </section>
+      {actor.role === "superadmin" && <SuperAdminActivity />}
     </div>
   );
+}
+
+function SuperAdminActivity() {
+  const supabase = getSupabaseBrowser();
+  const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [message, setMessage] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+
+  const load = useCallback(async () => {
+    if (!supabase) return;
+    const [activity, audit] = await Promise.all([
+      supabase.rpc("get_superadmin_activity"),
+      supabase.rpc("get_superadmin_audit_log", { p_limit: 60 }),
+    ]);
+    if (activity.error || audit.error) {
+      setMessage("No se pudo cargar el panel de supervisión.");
+      return;
+    }
+    setActiveUsers((activity.data ?? []) as ActiveUser[]);
+    setAuditEntries((audit.data ?? []) as AuditEntry[]);
+    setMessage("");
+  }, [supabase]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void load();
+    }, 0);
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      void load();
+    }, 30_000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+    };
+  }, [load]);
+
+  return (
+    <section className="superadmin-activity">
+      <div className="superadmin-head">
+        <div>
+          <p className="eyebrow">SUPERVISIÓN EXCLUSIVA</p>
+          <h3>Actividad de THOR</h3>
+          <p>Solo el Superadministrador puede ver quién está conectado y las acciones registradas.</p>
+        </div>
+        <button className="secondary" onClick={() => void load()}>Actualizar</button>
+      </div>
+      {message && <p className="users-message" role="status">{message}</p>}
+      <div className="activity-grid">
+        <section className="card activity-card">
+          <div className="card-head"><div><p className="eyebrow">USUARIOS CONECTADOS</p><h3>{activeUsers.length} en línea</h3></div><span className="connection-pill"><i /> En tiempo real</span></div>
+          {activeUsers.length ? <div className="activity-users">{activeUsers.map((user) => <article key={`${user.user_id}-${user.signed_in_at}`}><span className="user-avatar">{user.name.slice(0, 2).toUpperCase()}</span><div><strong>{user.name}</strong><small>{roleName(user.role)} · {user.location_name ?? "Sin sede"}</small><small>Activo {timeSince(user.signed_in_at, now)} · última señal {timeSince(user.last_seen_at, now)}</small></div><span className="badge success">Conectado</span></article>)}</div> : <p className="empty">No hay usuarios con actividad en los últimos 3 minutos.</p>}
+        </section>
+        <section className="card activity-card audit-card">
+          <div className="card-head"><div><p className="eyebrow">BITÁCORA DE ACCIONES</p><h3>Últimos movimientos</h3></div><span className="badge neutral">{auditEntries.length} registros</span></div>
+          {auditEntries.length ? <div className="audit-list">{auditEntries.map((entry) => <article key={entry.id}><span className="audit-dot" /><div><strong>{auditLabel(entry.action)}</strong><small>{entry.actor_name ?? "Sistema"} · {roleName(entry.actor_role ?? "")}</small><small>{new Date(entry.created_at).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" })}{entry.detail?.code ? ` · ${String(entry.detail.code)}` : ""}</small></div></article>)}</div> : <p className="empty">Aún no hay movimientos en la bitácora.</p>}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function roleName(role: string) {
+  return role === "superadmin" ? "Superadministrador" : role === "admin" ? "Administrador" : role === "seller" ? "Vendedor" : "Sistema";
+}
+
+function auditLabel(action: string) {
+  const labels: Record<string, string> = {
+    "session.started": "Inicio de sesión",
+    "session.signed_out": "Cierre de sesión",
+    "session.inactive_timeout": "Sesión cerrada por inactividad",
+    "sale.completed": "Venta confirmada",
+  };
+  return labels[action] ?? action.replaceAll(".", " · ");
+}
+
+function timeSince(value: string, now: number) {
+  const seconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return "hace instantes";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `hace ${hours} h ${minutes % 60} min`;
 }
 
 function UserAvatar({ user }: { user: ManagedUser }) {

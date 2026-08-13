@@ -52,7 +52,7 @@ Deno.serve(async (request) => {
     if (createError || !created.user) throw createError ?? new Error("No se pudo crear la cuenta.");
 
     const username = `${email.split("@")[0].replace(/[^a-z0-9._-]/gi, "").toLowerCase()}-${created.user.id.slice(0, 6)}`;
-    const { error: profileError } = await adminClient.from("app_users").insert({
+    const { data: profile, error: profileError } = await adminClient.from("app_users").insert({
       auth_user_id: created.user.id,
       name,
       email,
@@ -60,11 +60,18 @@ Deno.serve(async (request) => {
       role: requestedRole,
       location_id: locationId,
       active: true,
-    });
+    }).select("id").single();
     if (profileError) {
       await adminClient.auth.admin.deleteUser(created.user.id);
       throw profileError;
     }
+    await adminClient.from("audit_log").insert({
+      actor_id: caller.id,
+      action: "user.created",
+      entity_type: "app_user",
+      entity_id: profile.id,
+      detail: { name, email, role: requestedRole, location_id: locationId },
+    });
 
     return Response.json({ ok: true }, { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
