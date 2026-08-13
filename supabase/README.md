@@ -58,10 +58,11 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 
 ## Catálogo antes de inventario
 
-1. Ejecuta `migrations/202608130013_product_catalog_and_scanner.sql` después de la migración 012.
-2. Ya no se ingresan equipos directamente desde **Inventario**. Primero se crea la referencia en **Catálogo** (marca, modelo y capacidad o potencia); después se selecciona en **Compras** y se agrega al lote.
-3. El catálogo incluye iPhone 14 en adelante, Galaxy S24 en adelante y cargadores USB-C por potencia. Si llega un modelo que no está en la lista, el Administrador o Superadministrador crea primero ese modelo y sus variantes.
-4. Para equipos serializados, **Compras** permite escanear el código de barras del IMEI desde la cámara cuando el navegador lo soporta. Si Safari no ofrece la lectura automática, se conserva el ingreso manual o por lector Bluetooth.
+1. Ejecuta `migrations/202608130013_product_catalog_and_scanner.sql` y después `migrations/202608130014_prevent_duplicate_catalog_products.sql`.
+2. Ya no se ingresan equipos directamente desde **Inventario**. En **Catálogo** se crea el producto completo (marca, modelo y capacidad o potencia); después se selecciona en **Compras** y se agrega al lote.
+3. El catálogo incluye iPhone 14 en adelante, Galaxy S24 en adelante y cargadores USB-C por potencia. Marca + modelo + capacidad/potencia es una combinación única: THOR no permite crear el mismo producto dos veces.
+4. Si llega un modelo que no está en la lista, el Administrador o Superadministrador crea primero el modelo y luego el producto con su capacidad o potencia.
+5. Para equipos serializados, **Compras** permite escanear el código de barras del IMEI desde la cámara cuando el navegador lo soporta. Si Safari no ofrece la lectura automática, se conserva el ingreso manual o por lector Bluetooth.
 
 ## Recuperacion de contrasena
 

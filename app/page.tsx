@@ -119,8 +119,12 @@ type CatalogTemplate = {
   variant_options: string[];
 };
 type DetectedBarcode = { rawValue?: string };
-type BrowserBarcodeDetector = { detect: (source: HTMLVideoElement) => Promise<DetectedBarcode[]> };
-type BrowserBarcodeConstructor = new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
+type BrowserBarcodeDetector = {
+  detect: (source: HTMLVideoElement) => Promise<DetectedBarcode[]>;
+};
+type BrowserBarcodeConstructor = new (options?: {
+  formats?: string[];
+}) => BrowserBarcodeDetector;
 type ManagedUser = {
   id: string;
   name: string;
@@ -661,7 +665,8 @@ export default function Home() {
   };
 
   // La recepción directa se mantiene desactivada: todo ingreso real pasa por Compras y Catálogo.
-  const register = (event: FormEvent<HTMLFormElement>) => event.preventDefault();
+  const register = (event: FormEvent<HTMLFormElement>) =>
+    event.preventDefault();
 
   const openNewRecord = () => {
     const targetBySection: Partial<Record<Section, string>> = {
@@ -720,7 +725,7 @@ export default function Home() {
         ? "Usuarios"
         : name === "catalogo"
           ? "Catálogo"
-        : name[0].toUpperCase() + name.slice(1);
+          : name[0].toUpperCase() + name.slice(1);
   const navigationIcon = (name: Section) =>
     ({
       inicio: "⌂",
@@ -840,7 +845,7 @@ export default function Home() {
                     ? "Usuarios"
                     : name === "catalogo"
                       ? "Catálogo"
-                    : name[0].toUpperCase() + name.slice(1)}
+                      : name[0].toUpperCase() + name.slice(1)}
               </button>
             ))}
         </nav>
@@ -1156,7 +1161,9 @@ export default function Home() {
             </section>
           </div>
         )}
-        {section === "catalogo" && actor && actor.role !== "seller" && <CatalogCenter />}
+        {section === "catalogo" && actor && actor.role !== "seller" && (
+          <CatalogCenter />
+        )}
         {section === "compras" && actor && actor.role !== "seller" && (
           <PurchaseCenter
             actor={{ ...actor, locationId: operationLocationId }}
@@ -1654,41 +1661,269 @@ function CatalogCenter() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const template = templates.find((item) => item.id === templateId);
+  const selectedProductExists = Boolean(
+    template &&
+      variant &&
+      products.some(
+        (product) =>
+          product.brand?.toLocaleLowerCase() ===
+            template.brand.toLocaleLowerCase() &&
+          product.name.toLocaleLowerCase() ===
+            template.name.toLocaleLowerCase() &&
+          (product.variant ?? "").toLocaleLowerCase() ===
+            variant.toLocaleLowerCase() &&
+          product.category === template.category,
+      ),
+  );
   const load = useCallback(async () => {
     if (!supabase) return;
     const [templateResult, productResult] = await Promise.all([
-      supabase.from("product_catalog_templates").select("id, brand, name, category, variant_label, variant_options").eq("active", true).order("brand").order("name"),
-      supabase.from("products").select("id, sku, name, brand, category, variant").eq("active", true).order("brand").order("name"),
+      supabase
+        .from("product_catalog_templates")
+        .select("id, brand, name, category, variant_label, variant_options")
+        .eq("active", true)
+        .order("brand")
+        .order("name"),
+      supabase
+        .from("products")
+        .select("id, sku, name, brand, category, variant")
+        .eq("active", true)
+        .order("brand")
+        .order("name"),
     ]);
-    if (templateResult.error || productResult.error) setMessage("Ejecuta primero la migración de catálogo en Supabase.");
-    else { setTemplates((templateResult.data ?? []) as CatalogTemplate[]); setProducts((productResult.data ?? []) as CatalogProduct[]); }
+    if (templateResult.error || productResult.error)
+      setMessage("Ejecuta primero la migración de catálogo en Supabase.");
+    else {
+      setTemplates((templateResult.data ?? []) as CatalogTemplate[]);
+      setProducts((productResult.data ?? []) as CatalogProduct[]);
+    }
   }, [supabase]);
-  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
   const createReference = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!supabase || !template || !variant) return setMessage("Elige modelo y variante.");
-    setSaving(true); setMessage("");
-    try { const result = await supabase.rpc("create_catalog_product", { p_template_id: template.id, p_variant: variant }); if (result.error) throw result.error; setMessage(`Referencia ${(result.data as { sku: string }).sku} lista para usar en Compras.`); setVariant(""); await load(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo crear la referencia."); }
-    finally { setSaving(false); }
+    if (!supabase || !template || !variant)
+      return setMessage("Elige modelo y variante.");
+    if (selectedProductExists)
+      return setMessage(
+        "Ese producto ya existe en el catálogo. Selecciónalo directamente cuando hagas la compra.",
+      );
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await supabase.rpc("create_catalog_product", {
+        p_template_id: template.id,
+        p_variant: variant,
+      });
+      if (result.error) throw result.error;
+      setMessage(
+        `Producto ${(result.data as { sku: string }).sku} creado y disponible para Compras.`,
+      );
+      setVariant("");
+      await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo crear el producto.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
   const createTemplate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase) return;
     const form = new FormData(event.currentTarget);
-    const brand = String(form.get("brand") || "").trim(); const name = String(form.get("name") || "").trim(); const category = String(form.get("category") || "phone");
-    const options = String(form.get("variants") || "").split(",").map((item) => item.trim()).filter(Boolean);
-    if (!brand || !name || !options.length) return setMessage("Completa marca, modelo y al menos una variante.");
-    setSaving(true); setMessage("");
+    const brand = String(form.get("brand") || "").trim();
+    const name = String(form.get("name") || "").trim();
+    const category = String(form.get("category") || "phone");
+    const options = String(form.get("variants") || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!brand || !name || !options.length)
+      return setMessage("Completa marca, modelo y al menos una variante.");
+    setSaving(true);
+    setMessage("");
     try {
-      const prefix = `${brand.slice(0, 4)}-${name}`.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 36);
-      const result = await supabase.from("product_catalog_templates").insert({ sku_prefix: `${prefix}-${Date.now().toString().slice(-4)}`, brand, name, category, variant_label: category === "phone" ? "Capacidad" : "Variante", variant_options: options });
+      const prefix = `${brand.slice(0, 4)}-${name}`
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 36);
+      const result = await supabase
+        .from("product_catalog_templates")
+        .insert({
+          sku_prefix: `${prefix}-${Date.now().toString().slice(-4)}`,
+          brand,
+          name,
+          category,
+          variant_label: category === "phone" ? "Capacidad" : "Variante",
+          variant_options: options,
+        });
       if (result.error) throw result.error;
-      setCustomOpen(false); setMessage("Modelo creado en el catálogo. Ahora selecciónalo y crea su referencia."); await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo crear el modelo."); }
-    finally { setSaving(false); }
+      setCustomOpen(false);
+      setMessage(
+        "Modelo creado. Ahora elige su capacidad o potencia para crear el producto.",
+      );
+      await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo crear el modelo.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
-  return <div className="content catalog-page"><section className="catalog-hero"><div><p className="eyebrow">CATÁLOGO CONTROLADO</p><h2>Primero la referencia. Luego el lote.</h2><p>Evita productos duplicados: elige marca, modelo y capacidad antes de recibir mercadería.</p></div><span className="badge success">{products.length} referencias activas</span></section><section className="card catalog-create" id="new-catalog-product"><div className="card-head"><div><p className="eyebrow">NUEVA REFERENCIA</p><h3>Crear una variante de catálogo</h3></div><button className="secondary" type="button" onClick={() => setCustomOpen((current) => !current)}>+ Nuevo modelo</button></div><form onSubmit={createReference} className="catalog-form"><label>Marca y modelo<select value={templateId} onChange={(event) => { setTemplateId(event.target.value); setVariant(""); }} required><option value="">Selecciona un modelo del mercado</option>{templates.map((item) => <option key={item.id} value={item.id}>{item.brand} · {item.name}</option>)}</select></label><label>{template?.variant_label ?? "Capacidad / variante"}<select value={variant} onChange={(event) => setVariant(event.target.value)} disabled={!template} required><option value="">Selecciona una opción</option>{template?.variant_options.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><button className="primary" type="submit" disabled={saving || !template}>{saving ? "Creando..." : "Crear referencia"}</button></form>{customOpen && <form className="catalog-custom-form" onSubmit={createTemplate}><label>Marca<input name="brand" placeholder="Ej. Xiaomi" required /></label><label>Modelo<input name="name" placeholder="Ej. Redmi Note 14 Pro" required /></label><label>Tipo<select name="category"><option value="phone">Celular</option><option value="accessory">Accesorio</option><option value="tablet">Tablet</option><option value="laptop">Laptop</option></select></label><label className="catalog-wide">Capacidades o variantes, separadas por coma<input name="variants" placeholder="128 GB, 256 GB, 512 GB" required /></label><button className="secondary" type="submit" disabled={saving}>Guardar modelo en catálogo</button></form>}</section><section className="card catalog-references"><div className="card-head"><div><p className="eyebrow">REFERENCIAS DISPONIBLES</p><h3>Usa estas referencias desde Compras</h3></div></div>{products.length ? <div className="catalog-reference-list">{products.map((product) => <article key={product.id}><div><strong>{[product.brand, product.name, product.variant].filter(Boolean).join(" · ")}</strong><small>{product.sku} · {product.category === "accessory" ? "Accesorio" : "Equipo serializado"}</small></div><span className="badge neutral">Activa</span></article>)}</div> : <p className="empty">Todavía no creaste referencias. Elige un modelo y capacidad arriba.</p>}</section>{message && <p className="users-message" role="status">{message}</p>}</div>;
+  return (
+    <div className="content catalog-page">
+      <section className="catalog-hero">
+        <div>
+          <p className="eyebrow">CATÁLOGO CONTROLADO</p>
+          <h2>Crea el producto. Luego agrégalo al lote.</h2>
+          <p>
+            Evita productos duplicados: elige marca, modelo y capacidad antes de
+            recibir mercadería.
+          </p>
+        </div>
+        <span className="badge success">
+          {products.length} productos activos
+        </span>
+      </section>
+      <section className="card catalog-create" id="new-catalog-product">
+        <div className="card-head">
+          <div>
+            <p className="eyebrow">NUEVO PRODUCTO</p>
+            <h3>Marca, modelo y capacidad</h3>
+          </div>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => setCustomOpen((current) => !current)}
+          >
+            + Nuevo modelo
+          </button>
+        </div>
+        <form onSubmit={createReference} className="catalog-form">
+          <label>
+            Marca y modelo
+            <select
+              value={templateId}
+              onChange={(event) => {
+                setTemplateId(event.target.value);
+                setVariant("");
+              }}
+              required
+            >
+              <option value="">Selecciona un modelo del mercado</option>
+              {templates.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.brand} · {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {template?.variant_label ?? "Capacidad / variante"}
+            <select
+              value={variant}
+              onChange={(event) => setVariant(event.target.value)}
+              disabled={!template}
+              required
+            >
+              <option value="">Selecciona una opción</option>
+              {template?.variant_options.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="primary"
+            type="submit"
+            disabled={saving || !template || !variant || selectedProductExists}
+          >
+            {selectedProductExists ? "Producto ya creado" : saving ? "Creando..." : "Crear producto"}
+          </button>
+        </form>
+        {customOpen && (
+          <form className="catalog-custom-form" onSubmit={createTemplate}>
+            <label>
+              Marca
+              <input name="brand" placeholder="Ej. Xiaomi" required />
+            </label>
+            <label>
+              Modelo
+              <input name="name" placeholder="Ej. Redmi Note 14 Pro" required />
+            </label>
+            <label>
+              Tipo
+              <select name="category">
+                <option value="phone">Celular</option>
+                <option value="accessory">Accesorio</option>
+                <option value="tablet">Tablet</option>
+                <option value="laptop">Laptop</option>
+              </select>
+            </label>
+            <label className="catalog-wide">
+              Capacidades o variantes, separadas por coma
+              <input
+                name="variants"
+                placeholder="128 GB, 256 GB, 512 GB"
+                required
+              />
+            </label>
+            <button className="secondary" type="submit" disabled={saving}>
+              Guardar modelo en catálogo
+            </button>
+          </form>
+        )}
+      </section>
+      <section className="card catalog-references">
+        <div className="card-head">
+          <div>
+            <p className="eyebrow">PRODUCTOS DISPONIBLES</p>
+            <h3>Selecciona estos productos desde Compras</h3>
+          </div>
+        </div>
+        {products.length ? (
+          <div className="catalog-reference-list">
+            {products.map((product) => (
+              <article key={product.id}>
+                <div>
+                  <strong>
+                    {[product.brand, product.name, product.variant]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </strong>
+                  <small>
+                    {product.sku} ·{" "}
+                    {product.category === "accessory"
+                      ? "Accesorio"
+                      : "Equipo serializado"}
+                  </small>
+                </div>
+                <span className="badge neutral">Activa</span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">
+            Aún no creaste productos. Elige un modelo y capacidad arriba.
+          </p>
+        )}
+      </section>
+      {message && (
+        <p className="users-message" role="status">
+          {message}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
@@ -1702,29 +1937,80 @@ function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
     let stopped = false;
     let timer = 0;
     const start = async () => {
-      const Detector = (window as unknown as { BarcodeDetector?: BrowserBarcodeConstructor }).BarcodeDetector;
-      if (!Detector) { setMessage("Este navegador no permite lectura automática. Ingresa el IMEI o usa un lector Bluetooth."); return; }
+      const Detector = (
+        window as unknown as { BarcodeDetector?: BrowserBarcodeConstructor }
+      ).BarcodeDetector;
+      if (!Detector) {
+        setMessage(
+          "Este navegador no permite lectura automática. Ingresa el IMEI o usa un lector Bluetooth.",
+        );
+        return;
+      }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+        });
         if (!videoRef.current || stopped) return;
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
-        const detector = new Detector({ formats: ["code_128", "code_39", "ean_13", "qr_code", "data_matrix"] });
+        const detector = new Detector({
+          formats: ["code_128", "code_39", "ean_13", "qr_code", "data_matrix"],
+        });
         const scan = async () => {
           if (stopped || !videoRef.current) return;
           const codes = await detector.detect(videoRef.current);
-          const value = codes.find((code) => code.rawValue?.trim())?.rawValue?.trim();
-          if (value) { onDetected(value); setOpen(false); return; }
+          const value = codes
+            .find((code) => code.rawValue?.trim())
+            ?.rawValue?.trim();
+          if (value) {
+            onDetected(value);
+            setOpen(false);
+            return;
+          }
           timer = window.setTimeout(() => void scan(), 400);
         };
         void scan();
-      } catch { setMessage("No se pudo abrir la cámara. Autoriza el permiso y vuelve a intentarlo."); }
+      } catch {
+        setMessage(
+          "No se pudo abrir la cámara. Autoriza el permiso y vuelve a intentarlo.",
+        );
+      }
     };
     void start();
-    return () => { stopped = true; window.clearTimeout(timer); stream?.getTracks().forEach((track) => track.stop()); };
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
   }, [onDetected, open]);
 
-  return <div className="imei-scanner"><button className="text-button" type="button" onClick={() => { setMessage(""); setOpen(true); }}>Escanear con cámara</button>{open && <div className="scanner-panel"><video ref={videoRef} muted playsInline /><p>{message || "Apunta al código de barras donde figura el IMEI."}</p><button className="secondary" type="button" onClick={() => setOpen(false)}>Cerrar cámara</button></div>}</div>;
+  return (
+    <div className="imei-scanner">
+      <button
+        className="text-button"
+        type="button"
+        onClick={() => {
+          setMessage("");
+          setOpen(true);
+        }}
+      >
+        Escanear con cámara
+      </button>
+      {open && (
+        <div className="scanner-panel">
+          <video ref={videoRef} muted playsInline />
+          <p>{message || "Apunta al código de barras donde figura el IMEI."}</p>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => setOpen(false)}
+          >
+            Cerrar cámara
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PurchaseCenter({
@@ -1943,7 +2229,7 @@ function PurchaseCenter({
       .filter(Boolean);
     if (!line.productId || line.unit_cost === "" || line.sale_price === "")
       return setMessage(
-        "Selecciona primero una referencia del catálogo y completa costo y precio.",
+        "Selecciona primero un producto del catálogo y completa costo y precio.",
       );
     if (
       line.category !== "accessory" &&
@@ -2240,15 +2526,39 @@ function PurchaseCenter({
             <form onSubmit={addLine}>
               <div className="catalog-product-picker">
                 <label>
-                  Referencia del catÃ¡logo
-                  <select value={line.productId} onChange={(event) => selectCatalogProduct(event.target.value)} required>
-                    <option value="">Selecciona marca, modelo y capacidad</option>
-                    {catalogProducts.map((product) => <option key={product.id} value={product.id}>{[product.brand, product.name, product.variant].filter(Boolean).join(" Â· ")}</option>)}
+                  Producto del catálogo
+                  <select
+                    value={line.productId}
+                    onChange={(event) =>
+                      selectCatalogProduct(event.target.value)
+                    }
+                    required
+                  >
+                    <option value="">
+                      Selecciona marca, modelo y capacidad
+                    </option>
+                    {catalogProducts.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {[product.brand, product.name, product.variant]
+                          .filter(Boolean)
+                          .join(" Â· ")}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <div className="catalog-help">
-                  <strong>{line.productId ? `${line.sku} Â· ${line.category === "accessory" ? "Accesorio" : "Equipo serializado"}` : "Â¿No existe la referencia?"}</strong>
-                  <button type="button" className="text-button" onClick={onOpenCatalog}>Crear primero en CatÃ¡logo</button>
+                  <strong>
+                    {line.productId
+                      ? `${line.sku} Â· ${line.category === "accessory" ? "Accesorio" : "Equipo serializado"}`
+                      : "¿No existe el producto?"}
+                  </strong>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={onOpenCatalog}
+                  >
+                    Crear producto en Catálogo
+                  </button>
                 </div>
               </div>
               <div className="purchase-line-grid purchase-price-grid">
@@ -2310,7 +2620,19 @@ function PurchaseCenter({
               </div>
               {line.category !== "accessory" && (
                 <label className="identifiers-field">
-                  <span className="imei-label">IMEI o serie <ImeiScanner onDetected={(value) => setLine((current) => ({ ...current, identifiers: current.identifiers ? `${current.identifiers}\n${value}` : value }))} /></span>
+                  <span className="imei-label">
+                    IMEI o serie{" "}
+                    <ImeiScanner
+                      onDetected={(value) =>
+                        setLine((current) => ({
+                          ...current,
+                          identifiers: current.identifiers
+                            ? `${current.identifiers}\n${value}`
+                            : value,
+                        }))
+                      }
+                    />
+                  </span>
                   <textarea
                     value={line.identifiers}
                     inputMode="numeric"
