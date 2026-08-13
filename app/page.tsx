@@ -164,6 +164,7 @@ export default function Home() {
   const [payments, setPayments] = useState<Payment[]>([newPayment()]);
   const [savingSale, setSavingSale] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activitySessionKey] = useState(() => crypto.randomUUID());
   const [actor, setActor] = useState<{
     id: string;
@@ -729,6 +730,16 @@ export default function Home() {
           ? "Nuevo usuario"
           : "Nueva venta";
 
+  const navigationItems = [
+    "inicio", "inventario", "compras", "ventas", "caja", "clientes", "proveedores", "usuarios", "manuales",
+  ] as Section[];
+  const availableNavigation = navigationItems.filter(
+    (name) => (name !== "usuarios" && name !== "compras") || actor?.role !== "seller",
+  );
+  const navigationLabel = (name: Section) => name === "manuales" ? "Manuales" : name === "usuarios" ? "Usuarios" : name[0].toUpperCase() + name.slice(1);
+  const navigationIcon = (name: Section) => ({ inicio: "⌂", inventario: "▦", compras: "▣", ventas: "▱", caja: "◫", clientes: "♙", proveedores: "▤", usuarios: "♙", manuales: "?" })[name];
+  const selectMobileSection = (name: Section) => { setSection(name); setMobileMenuOpen(false); };
+
   const items = useMemo(
     () =>
       stock.filter((item) =>
@@ -862,6 +873,35 @@ export default function Home() {
           <span aria-hidden="true">●</span> Conectado
         </div>
       </aside>
+      {mobileMenuOpen && (
+        <div className="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)}>
+          <aside className="mobile-menu" role="dialog" aria-modal="true" aria-label="Menú de navegación" onClick={(event) => event.stopPropagation()}>
+            <header className="mobile-menu-head">
+              <div className="brand"><span className="bolt">ϟ</span><span>THOR</span></div>
+              <button className="mobile-menu-close" type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Cerrar menú">×</button>
+            </header>
+            <div className="mobile-location">
+              <p className="location-label">SEDE ACTIVA</p>
+              {actor?.role === "seller" ? <div className="location">{operationLocationName}</div> : (
+                <select className="location location-selector" value={operationLocationId} onChange={(event) => { const locationId = event.target.value; setActiveLocationId(locationId); void refresh(locationId); }} aria-label="Cambiar sede operativa">
+                  {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                </select>
+              )}
+            </div>
+            <nav className="mobile-menu-links">
+              {availableNavigation.map((name) => <button key={name} className={`nav-item ${section === name ? "active" : ""}`} onClick={() => selectMobileSection(name)}><span aria-hidden="true">{navigationIcon(name)}</span>{navigationLabel(name)}</button>)}
+            </nav>
+            <footer className="mobile-profile">
+              <label className="avatar avatar-upload" title="Cambiar foto de perfil">
+                {actor?.avatarPath && avatarUrl ? <img src={avatarUrl} alt={`Foto de ${actor?.name ?? "usuario"}`} /> : actor?.name.slice(0, 2).toUpperCase() ?? "TH"}
+                <input type="file" accept="image/*" onChange={uploadAvatar} aria-label="Cambiar foto de perfil" />
+              </label>
+              <div><strong>{actor?.name ?? "THOR"}</strong><small>{actor?.role === "superadmin" ? "Superadministrador" : actor?.role === "admin" ? "Administrador general" : "Vendedor"}</small></div>
+              <button className="sign-out" onClick={() => void signOut()} aria-label="Cerrar sesión"><span aria-hidden="true">↪</span><span>Salir</span></button>
+            </footer>
+          </aside>
+        </div>
+      )}
       <section className="workspace">
         {idleWarning && (
           <div className="idle-warning" role="status">
@@ -869,6 +909,7 @@ export default function Home() {
           </div>
         )}
         <header className="topbar">
+          <button className="mobile-menu-trigger" type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menú">☰</button>
           <div>
             <p className="eyebrow">THOR · PERÚ</p>
             <h1>

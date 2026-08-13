@@ -1477,6 +1477,10 @@ p {
 .mobile-nav {
   display: none;
 }
+.mobile-menu-trigger,
+.mobile-menu-backdrop {
+  display: none;
+}
 @media (max-width: 900px) {
   .side-nav {
     width: 74px;
@@ -1558,9 +1562,7 @@ p {
   }
 }
 @media (max-width: 650px) {
-  .thor-app {
-    padding-bottom: 70px;
-  }
+  .thor-app { min-width: 0; }
   .side-nav {
     display: none;
   }
@@ -1570,7 +1572,81 @@ p {
   .topbar {
     height: 80px;
     padding: 15px 18px;
+    gap: 12px;
   }
+  .topbar > div { min-width: 0; flex: 1; }
+  .mobile-menu-trigger {
+    display: grid;
+    place-items: center;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    border: 1px solid #d8dfdc;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--ink);
+    font-size: 23px;
+    line-height: 1;
+  }
+  .mobile-menu-backdrop {
+    display: block;
+    position: fixed;
+    z-index: 30;
+    inset: 0;
+    background: #10202aaa;
+  }
+  .mobile-menu {
+    width: min(86vw, 360px);
+    height: 100dvh;
+    padding: 20px 16px calc(18px + env(safe-area-inset-bottom));
+    background: var(--nav);
+    color: #dce3e4;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 12px 0 32px #0005;
+    overflow: hidden;
+  }
+  .mobile-menu-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .mobile-menu .brand {
+    padding: 0;
+    font-size: 25px;
+  }
+  .mobile-menu-close {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #3a4851;
+    border-radius: 9px;
+    background: transparent;
+    color: #fff;
+    font-size: 27px;
+  }
+  .mobile-location .location-label { display: block; padding: 0 2px; }
+  .mobile-location .location { display: block; width: 100%; margin-bottom: 16px; }
+  .mobile-menu-links {
+    display: grid;
+    gap: 5px;
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0 14px;
+  }
+  .mobile-menu-links .nav-item { justify-content: flex-start; padding: 12px 13px; }
+  .mobile-menu-links .nav-item > span { width: 18px; font-size: 20px; }
+  .mobile-profile {
+    border-top: 1px solid #32404a;
+    padding: 15px 6px 0;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .mobile-profile div { display: grid; gap: 2px; flex: 1; min-width: 0; }
+  .mobile-profile strong, .mobile-profile small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-profile small { color: #91a1aa; }
+  .mobile-profile .sign-out { color: #cbd5d8; }
   .topbar h1 {
     font-size: 20px;
   }
