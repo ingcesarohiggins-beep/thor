@@ -48,6 +48,14 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 3. El efectivo central se registra con la sede **Almacén Central** activa; el efectivo de una sede se descuenta únicamente de su propia caja.
 4. Los accesorios ingresan por cantidad y costo promedio. Los celulares, laptops y tablets requieren un IMEI o serie por cada unidad recibida.
 
+## Lotes por etapas y flete
+
+1. DespuÃ©s de ejecutar la migraciÃ³n 011, ejecuta `migrations/202608130012_two_step_purchase_lots_and_freight.sql`.
+2. Primero crea el lote: proveedor, factura o guÃ­a, forma de pago, flete y comprobante. En celular, el comprobante permite tomar una foto con la cÃ¡mara.
+3. DespuÃ©s agrega uno o varios productos al lote. Los accesorios ingresan por cantidad; celulares, laptops y tablets requieren un IMEI o serie por unidad. Puedes retomar un lote pendiente desde **Compras**.
+4. Al confirmar se registra una sola vez el stock, el pago inmediato de la factura y el gasto de flete. No existe crÃ©dito a proveedores.
+5. Efectivo central requiere tener activa la sede **AlmacÃ©n Central** y una caja abierta; el efectivo de una sede solo descuenta su propia caja. Transferencia y Yape/Plin se registran como salida de tesorerÃ­a sin afectar el efectivo de caja.
+
 ## Recuperacion de contrasena
 
 En Supabase > Authentication > URL Configuration, agrega la URL publica de THOR en **Redirect URLs**. Luego cada usuario puede usar **Olvide mi contrasena** desde la pantalla de inicio de sesion.

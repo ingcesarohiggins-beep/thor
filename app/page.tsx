@@ -1453,6 +1453,169 @@ function PurchaseCenter({
 }) {
   const supabase = getSupabaseBrowser();
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
+  const [supplierId, setSupplierId] = useState("");
+  const [receiptNumber, setReceiptNumber] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [freight, setFreight] = useState<number | "">("");
+  const [freightMethod, setFreightMethod] = useState("bank_transfer");
+  const [freightNote, setFreightNote] = useState("");
+  const [invoice, setInvoice] = useState<File | null>(null);
+  const [draft, setDraft] = useState<{ id: string; code: string } | null>(null);
+  const [pendingLots, setPendingLots] = useState<Array<{ id: string; code: string; receipt_number: string; supplier_id: string; payment_method: string; freight_amount: number; freight_payment_method: string | null; freight_description: string | null }>>([]);
+  const [line, setLine] = useState<PurchaseLine>(newPurchaseLine());
+  const [savedLines, setSavedLines] = useState<Array<{ sku: string; name: string; quantity: number; amount: number }>>([]);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const loadPurchaseSetup = useCallback(async () => {
+    if (!supabase) return;
+    const [supplierResult, lotsResult] = await Promise.all([
+      supabase.from("suppliers").select("id, name, ruc, phone, contact, address, active").eq("active", true).order("name"),
+      supabase.from("receipt_lots").select("id, code, receipt_number, supplier_id, payment_method, freight_amount, freight_payment_method, freight_description").eq("location_id", actor.locationId).eq("status", "pending").order("created_at", { ascending: false }),
+    ]);
+    if (supplierResult.error || lotsResult.error) setMessage("No se pudo cargar la información de compras.");
+    else {
+      setSuppliers((supplierResult.data ?? []) as SupplierRecord[]);
+      setPendingLots((lotsResult.data ?? []) as Array<{ id: string; code: string; receipt_number: string; supplier_id: string; payment_method: string; freight_amount: number; freight_payment_method: string | null; freight_description: string | null }>);
+    }
+  }, [actor.locationId, supabase]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadPurchaseSetup(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadPurchaseSetup]);
+
+  const invoiceTotal = savedLines.reduce((sum, item) => sum + item.amount, 0);
+  const freightValue = Number(freight || 0);
+  const methodLabel = (method: string) => ({ cash_box: "Efectivo de caja", central_cash: "Efectivo central", bank_transfer: "Transferencia bancaria", yape_plin: "Yape / Plin" })[method] ?? method;
+
+  const createLot = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !supplierId || !receiptNumber.trim()) return setMessage("Selecciona proveedor e ingresa factura o guía.");
+    setSaving(true); setMessage("");
+    try {
+      let invoicePath = "";
+      if (invoice) {
+        const extension = invoice.name.split(".").pop() || "jpg";
+        invoicePath = `receipts/${actor.id}/${crypto.randomUUID()}.${extension}`;
+        const upload = await supabase.storage.from("thor-files").upload(invoicePath, invoice, { contentType: invoice.type || "image/jpeg" });
+        if (upload.error) throw upload.error;
+      }
+      const result = await supabase.rpc("create_purchase_lot", {
+        p_supplier_id: supplierId, p_location_id: actor.locationId, p_receipt_number: receiptNumber.trim(),
+        p_payment_method: paymentMethod, p_receipt_photo_path: invoicePath, p_freight_amount: freightValue,
+        p_freight_payment_method: freightValue > 0 ? freightMethod : null, p_freight_description: freightNote.trim() || null,
+      });
+      if (result.error) throw result.error;
+      const data = result.data as { lot_id: string; code: string };
+      setDraft({ id: data.lot_id, code: data.code });
+      void loadPurchaseSetup();
+      setMessage(`Lote ${data.code} creado. Ahora agrega los productos que llegaron.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo crear el lote."); }
+    finally { setSaving(false); }
+  };
+
+  const resumeLot = async (lotId: string) => {
+    if (!supabase) return;
+    const lot = pendingLots.find((item) => item.id === lotId);
+    if (!lot) return;
+    setSaving(true); setMessage("");
+    try {
+      const result = await supabase.from("receipt_lot_lines").select("quantity, unit_cost, products(sku, name)").eq("receipt_lot_id", lotId);
+      if (result.error) throw result.error;
+      const rows = (result.data ?? []) as Array<{ quantity: number; unit_cost: number; products: Array<{ sku: string; name: string }> | null }>;
+      setSupplierId(lot.supplier_id); setReceiptNumber(lot.receipt_number); setPaymentMethod(lot.payment_method);
+      setFreight(Number(lot.freight_amount || 0)); setFreightMethod(lot.freight_payment_method || "bank_transfer"); setFreightNote(lot.freight_description || "");
+      setSavedLines(rows.map((item) => ({ sku: item.products?.[0]?.sku ?? "SKU", name: item.products?.[0]?.name ?? "Producto", quantity: Number(item.quantity), amount: Number(item.quantity) * Number(item.unit_cost) })));
+      setDraft({ id: lot.id, code: lot.code });
+      setMessage(`Lote ${lot.code} retomado. Puedes continuar agregando mercadería.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo retomar el lote."); }
+    finally { setSaving(false); }
+  };
+
+  const addLine = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || !draft) return;
+    const identifiers = line.identifiers.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean);
+    if (!line.sku.trim() || !line.name.trim() || line.unit_cost === "" || line.sale_price === "") return setMessage("Completa SKU, producto, costo y precio.");
+    if (line.category !== "accessory" && identifiers.length !== Number(line.quantity)) return setMessage("La cantidad debe coincidir con los IMEI o series ingresados.");
+    setSaving(true); setMessage("");
+    try {
+      const result = await supabase.rpc("add_purchase_lot_line", {
+        p_lot_id: draft.id, p_sku: line.sku.trim(), p_name: line.name.trim(), p_category: line.category,
+        p_quantity: Number(line.quantity), p_unit_cost: Number(line.unit_cost), p_sale_price: Number(line.sale_price), p_identifiers: identifiers,
+      });
+      if (result.error) throw result.error;
+      setSavedLines((current) => [...current, { sku: line.sku.trim(), name: line.name.trim(), quantity: Number(line.quantity), amount: Number(line.quantity) * Number(line.unit_cost) }]);
+      setLine(newPurchaseLine());
+      setMessage("Producto agregado al lote. Puedes añadir otro o confirmar la recepción.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo agregar el producto."); }
+    finally { setSaving(false); }
+  };
+
+  const confirmLot = async () => {
+    if (!supabase || !draft || !savedLines.length) return setMessage("Agrega al menos un producto antes de confirmar.");
+    if ((paymentMethod === "cash_box" || paymentMethod === "central_cash" || (freightValue > 0 && (freightMethod === "cash_box" || freightMethod === "central_cash"))) && !cashOpen) return setMessage("Abre tu caja antes de confirmar pagos en efectivo.");
+    setSaving(true); setMessage("");
+    try {
+      const result = await supabase.rpc("confirm_purchase_lot", { p_lot_id: draft.id });
+      if (result.error) throw result.error;
+      const data = result.data as { code?: string; total_outflow?: number } | null;
+      setMessage(`Lote ${data?.code ?? draft.code} confirmado. Salida total registrada: ${money.format(Number(data?.total_outflow ?? 0))}.`);
+      setDraft(null); setSupplierId(""); setReceiptNumber(""); setInvoice(null); setFreight(""); setFreightNote(""); setSavedLines([]); setLine(newPurchaseLine());
+      void loadPurchaseSetup();
+      await onCompleted();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar el lote."); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="content purchases-page">
+      {!draft && pendingLots.length > 0 && (
+        <section className="card pending-lots">
+          <div className="card-head">
+            <div>
+              <p className="eyebrow">LOTES ABIERTOS</p>
+              <h3>Continuar una recepción</h3>
+              <p>Elige un lote ya creado para seguir agregando productos sin repetir la factura ni el flete.</p>
+            </div>
+            <span className="badge neutral">{pendingLots.length} pendiente{pendingLots.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="pending-lot-list">
+            {pendingLots.map((lot) => (
+              <article key={lot.id}>
+                <div>
+                  <strong>{lot.code}</strong>
+                  <small>Factura {lot.receipt_number} · {suppliers.find((supplier) => supplier.id === lot.supplier_id)?.name ?? "Proveedor"}</small>
+                </div>
+                <button className="secondary" type="button" onClick={() => void resumeLot(lot.id)} disabled={saving}>Continuar</button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <section className="purchases-hero"><div><p className="eyebrow">ABASTECIMIENTO Y TESORERÍA</p><h2>Compras y recepción por lote</h2><p>Primero crea la cabecera del lote. Después agrega productos o IMEI y confirma una sola vez la entrada y los pagos.</p></div><div className="purchase-total"><span>{draft ? `Lote activo ${draft.code}` : "Destino de la recepción"}</span><strong>{draft ? money.format(invoiceTotal + freightValue) : locationName}</strong><small>{draft ? "Factura + flete" : "Stock separado por sede"}</small></div></section>
+      {!draft ? <form className="purchase-form" id="new-purchase" onSubmit={createLot}><section className="card purchase-header-card"><div className="card-head"><div><p className="eyebrow">01 · CREAR LOTE</p><h3>Documento, pagos y flete</h3><p>La factura, el proveedor y los gastos se guardan una sola vez en la cabecera.</p></div><span className="badge success">Sin crédito</span></div><div className="purchase-fields"><label>Proveedor<select value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required><option value="">Selecciona un proveedor</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.ruc ? ` · RUC ${supplier.ruc}` : ""}</option>)}</select></label><label>Factura o guía<input value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value)} required placeholder="Ej. F001-000245" /></label><label>Pago de factura<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}><option value="bank_transfer">Transferencia bancaria · tesorería</option><option value="yape_plin">Yape / Plin · tesorería</option><option value="cash_box">Efectivo · caja de sede</option><option value="central_cash">Efectivo · caja central</option></select></label><label>Comprobante<input type="file" accept="image/*,.pdf" capture="environment" onChange={(event) => setInvoice(event.target.files?.[0] ?? null)} /><small>En celular abre la cámara para foto de factura.</small></label><label>Flete (S/)<input type="number" min="0" step="0.01" value={freight} onChange={(event) => setFreight(event.target.value === "" ? "" : Number(event.target.value))} placeholder="0.00" /></label><label>Pago de flete<select value={freightMethod} onChange={(event) => setFreightMethod(event.target.value)} disabled={!freightValue}><option value="bank_transfer">Transferencia · tesorería</option><option value="yape_plin">Yape / Plin · tesorería</option><option value="cash_box">Efectivo · caja de sede</option><option value="central_cash">Efectivo · caja central</option></select></label><label className="purchase-wide">Detalle del flete<input value={freightNote} onChange={(event) => setFreightNote(event.target.value)} placeholder="Ej. Transporte Lima - almacén central" /></label></div>{(paymentMethod.includes("cash") || (freightValue > 0 && freightMethod.includes("cash"))) && !cashOpen && <p className="cash-required"><strong>La caja está cerrada.</strong> Abre tu caja antes de usar efectivo.</p>}<div className="purchase-submit"><div><span>Pago de factura</span><strong>{methodLabel(paymentMethod)}</strong></div><button className="primary" type="submit" disabled={saving}>{saving ? "Creando lote..." : "Crear lote y agregar productos"}</button></div></section></form> : <div className="purchase-form"><section className="card purchase-header-card"><div className="card-head"><div><p className="eyebrow">02 · LOTE {draft.code}</p><h3>Agregar productos al lote</h3><p>Accesorios por cantidad; celulares con un IMEI por unidad. Usa teclado numérico o un lector de códigos del teléfono.</p></div><span className="badge success">Lote abierto</span></div><form onSubmit={addLine}><div className="purchase-line-grid"><label>SKU<input value={line.sku} onChange={(event) => setLine({ ...line, sku: event.target.value })} placeholder="APP-CHG-20W" required /></label><label>Producto<input value={line.name} onChange={(event) => setLine({ ...line, name: event.target.value })} placeholder="Cargador USB-C 20W" required /></label><label>Tipo<select value={line.category} onChange={(event) => setLine({ ...line, category: event.target.value as PurchaseLine["category"] })}><option value="accessory">Accesorio / cargador</option><option value="phone">Celular</option><option value="laptop">Laptop</option><option value="tablet">Tablet</option></select></label><label>Cantidad<input type="number" min="1" inputMode="numeric" value={line.quantity} onChange={(event) => setLine({ ...line, quantity: Math.max(1, Number(event.target.value)) })} /></label><label>Costo unitario<input type="number" min="0" step="0.01" inputMode="decimal" value={line.unit_cost} onChange={(event) => setLine({ ...line, unit_cost: event.target.value === "" ? "" : Number(event.target.value) })} required /></label><label>Precio de venta<input type="number" min="0" step="0.01" inputMode="decimal" value={line.sale_price} onChange={(event) => setLine({ ...line, sale_price: event.target.value === "" ? "" : Number(event.target.value) })} required /></label></div>{line.category !== "accessory" && <label className="identifiers-field">IMEI o serie <textarea value={line.identifiers} onChange={(event) => setLine({ ...line, identifiers: event.target.value })} placeholder="Uno por línea o separado por comas." required /></label>}<div className="purchase-submit"><div><span>Subtotal de este producto</span><strong>{money.format(Number(line.quantity || 0) * Number(line.unit_cost || 0))}</strong></div><button className="secondary" type="submit" disabled={saving}>Agregar al lote</button></div></form></section><section className="card recent-lots"><div className="card-head"><div><p className="eyebrow">CONTENIDO DEL LOTE</p><h3>{savedLines.length} productos agregados</h3></div><span className="badge neutral">Factura: {money.format(invoiceTotal)}</span></div>{savedLines.length ? <div className="cash-list">{savedLines.map((item, index) => <article key={`${item.sku}-${index}`}><div><strong>{item.name}</strong><small>{item.sku} · {item.quantity} unidades</small></div><b>{money.format(item.amount)}</b></article>)}</div> : <p className="empty">Aún no agregaste mercadería a este lote.</p>}<div className="purchase-submit"><div><span>Flete: {money.format(freightValue)} · Total de salida</span><strong>{money.format(invoiceTotal + freightValue)}</strong></div><button className="primary" type="button" onClick={() => void confirmLot()} disabled={saving || !savedLines.length}>{saving ? "Confirmando..." : "Confirmar lote, pago y stock"}</button></div></section></div>}
+      {message && <p className="users-message" role="status">{message}</p>}
+    </div>
+  );
+}
+
+// Se conserva temporalmente como referencia del flujo de recepción anterior.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function LegacyPurchaseCenter({
+  actor,
+  locationName,
+  cashOpen,
+  onCompleted,
+}: {
+  actor: { id: string; name: string; role: string; locationId: string };
+  locationName: string;
+  cashOpen: boolean;
+  onCompleted: () => Promise<void>;
+}) {
+  const supabase = getSupabaseBrowser();
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [recentLots, setRecentLots] = useState<Array<{ id: string; code: string; receipt_number: string | null; total_cost: number; created_at: string; suppliers: { name: string }[] }>>([]);
   const [supplierId, setSupplierId] = useState("");
   const [receiptNumber, setReceiptNumber] = useState("");
