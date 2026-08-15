@@ -104,7 +104,7 @@ type PurchaseLine = {
   sku: string;
   name: string;
   category: "accessory" | "phone" | "laptop" | "tablet";
-  quantity: number;
+  quantity: number | "";
   unit_cost: number | "";
   sale_price: number | "";
   identifiers: string;
@@ -3043,12 +3043,13 @@ function PurchaseCenter({
                     min="1"
                     inputMode="numeric"
                     value={line.quantity}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const value = event.target.value;
                       setLine({
                         ...line,
-                        quantity: Math.max(1, Number(event.target.value)),
-                      })
-                    }
+                        quantity: value === "" ? "" : Math.max(1, Number(value)),
+                      });
+                    }}
                   />
                 </label>
                 <label>
@@ -3573,13 +3574,14 @@ function LegacyPurchaseCenter({
                       type="number"
                       min="1"
                       value={line.quantity}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const value = event.target.value;
                         updateLine(
                           index,
                           "quantity",
-                          Math.max(1, Number(event.target.value)),
-                        )
-                      }
+                          value === "" ? "" : Math.max(1, Number(value)),
+                        );
+                      }}
                       required
                     />
                   </label>
