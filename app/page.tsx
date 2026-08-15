@@ -4594,8 +4594,9 @@ function ManualCenter({
           purpose:
             "Atender con rapidez y confirmar cada venta sin perder el control del stock.",
           steps: [
+            "Abre tu caja con el fondo inicial antes de iniciar ventas.",
             "Busca el producto por nombre, IMEI o código.",
-            "Agrega los artículos, revisa cantidades y registra el pago.",
+            "Agrega los artículos, identifica al cliente cuando corresponda y registra el pago.",
             "Confirma la venta solo cuando el total esté pagado.",
           ],
           action: "Practicar una venta",
@@ -4605,7 +4606,7 @@ function ManualCenter({
             name: "Administrador",
             purpose: "Mantener la operación de la sede ordenada y verificable.",
             steps: [
-              "Crea el producto en Catálogo y recíbelo desde Compras con su lote, factura e IMEI.",
+              "Crea el producto en Catálogo y recíbelo desde Compras con su lote, factura, IMEI y evidencia fotográfica cuando sea un equipo.",
               "Revisa ventas, movimientos, lotes y diferencias de caja por sede.",
               "Confirma pagos inmediatos y conserva la evidencia de cada recepción.",
             ],
@@ -4667,7 +4668,7 @@ function ManualCenter({
     ],
     [
       "Compras y lotes",
-      "Recibe mercadería por factura, registra accesorios por cantidad y equipos por IMEI, con pago inmediato y trazabilidad de proveedor.",
+      "Recibe mercadería por factura: accesorios por cantidad y equipos por IMEI. Para equipos se exige una foto por unidad; la cámara o galería funciona también desde el celular.",
       "Activo",
     ],
     [
@@ -4713,8 +4714,8 @@ function ManualCenter({
         </div>
         <div className="manual-version">
           <span>Manual general</span>
-          <strong>Versión 1.1</strong>
-          <small>Actualizado: 13 ago. 2026</small>
+          <strong>Versión 1.2</strong>
+          <small>Actualizado: 15 ago. 2026</small>
         </div>
       </section>
       <section className="manual-role">
