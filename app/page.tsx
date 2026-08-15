@@ -33,6 +33,9 @@ type StockItem = {
   inventoryItemId?: string;
   productId: string;
   photoPath?: string | null;
+  imei?: string | null;
+  variant?: string | null;
+  searchText: string;
   name: string;
   detail: string;
   price: number;
@@ -306,6 +309,20 @@ function playImeiConfirmation() {
   }
 }
 
+function normalizeIdentifier(value: string) {
+  return value.replace(/[^a-zA-Z0-9]/g, "").toLocaleLowerCase();
+}
+
+function identifierFromScan(value: string) {
+  const numericIdentifier = value.match(/\d{14,17}/)?.[0];
+  return numericIdentifier ?? value.trim();
+}
+
+function isChargingAccessory(item: StockItem) {
+  const description = `${item.name} ${item.detail}`.toLocaleLowerCase();
+  return /cargador|cable|adaptador|usb/.test(description);
+}
+
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("inicio");
@@ -524,13 +541,13 @@ export default function Home() {
       await Promise.all([
         supabase
           .from("inventory_items")
-          .select("id, code, product_id, imei_1, serial, photo_path, products!inner(name)")
+          .select("id, code, product_id, imei_1, serial, photo_path, products!inner(name, sku, brand, variant)")
           .eq("location_id", locationId)
           .eq("status", "available"),
         supabase
           .from("stock_balances")
           .select(
-            "product_id, quantity, average_cost, products!inner(name, sku)",
+            "product_id, quantity, average_cost, products!inner(name, sku, brand, variant)",
           )
           .eq("location_id", locationId),
         supabase
@@ -579,33 +596,63 @@ export default function Home() {
         Number(price.price),
       ]),
     );
+    type JoinedProduct = {
+      name: string;
+      sku: string;
+      brand: string | null;
+      variant: string | null;
+    };
     const rows: StockItem[] = [
-      ...(serials.data ?? []).map((item) => ({
-        id: item.code,
-        inventoryItemId: item.id,
-        productId: item.product_id,
-        photoPath: item.photo_path,
-        name: (item.products as unknown as { name: string }).name,
-        detail: item.imei_1
-          ? `IMEI terminado en ${item.imei_1.slice(-4)}`
-          : item.serial
-            ? `Serie ${item.serial}`
-            : "Equipo",
-        price: priceMap.get(item.product_id) ?? 0,
-        qty: 1,
-        availableQty: 1,
-        kind: "Equipo" as const,
-      })),
-      ...(accessories.data ?? []).map((item) => ({
-        id: (item.products as unknown as { sku: string }).sku,
-        productId: item.product_id,
-        name: (item.products as unknown as { name: string }).name,
-        detail: `SKU ${(item.products as unknown as { sku: string }).sku}`,
-        price: priceMap.get(item.product_id) ?? 0,
-        qty: Number(item.quantity),
-        availableQty: Number(item.quantity),
-        kind: "Accesorio" as const,
-      })),
+      ...(serials.data ?? []).map((item) => {
+        const product = item.products as unknown as JoinedProduct;
+        return {
+          id: item.code,
+          inventoryItemId: item.id,
+          productId: item.product_id,
+          photoPath: item.photo_path,
+          imei: item.imei_1 ?? null,
+          variant: product.variant,
+          searchText: [
+            item.code,
+            product.sku,
+            product.brand,
+            product.name,
+            product.variant,
+            item.imei_1,
+            item.serial,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          name: product.name,
+          detail: item.imei_1
+            ? `${product.variant ? `${product.variant} · ` : ""}IMEI ${item.imei_1}`
+            : item.serial
+              ? `${product.variant ? `${product.variant} · ` : ""}Serie ${item.serial}`
+              : product.variant ?? "Equipo",
+          price: priceMap.get(item.product_id) ?? 0,
+          qty: 1,
+          availableQty: 1,
+          kind: "Equipo" as const,
+        };
+      }),
+      ...(accessories.data ?? []).map((item) => {
+        const product = item.products as unknown as JoinedProduct;
+        return {
+          id: product.sku,
+          productId: item.product_id,
+          imei: null,
+          variant: product.variant,
+          searchText: [product.sku, product.brand, product.name, product.variant]
+            .filter(Boolean)
+            .join(" "),
+          name: product.name,
+          detail: `${product.variant ? `${product.variant} · ` : ""}SKU ${product.sku}`,
+          price: priceMap.get(item.product_id) ?? 0,
+          qty: Number(item.quantity),
+          availableQty: Number(item.quantity),
+          kind: "Accesorio" as const,
+        };
+      }),
     ];
     setStock(rows);
     const salesTotal = (sales.data ?? []).reduce(
@@ -884,7 +931,7 @@ export default function Home() {
   const items = useMemo(
     () =>
       stock.filter((item) =>
-        `${item.id} ${item.name} ${item.detail}`
+        `${item.searchText} ${item.detail}`
           .toLowerCase()
           .includes(query.toLowerCase()),
       ),
@@ -922,6 +969,66 @@ export default function Home() {
     }
     addToCart(item);
   };
+  const matchingIdentifierItem = useMemo(() => {
+    const identifier = normalizeIdentifier(identifierFromScan(query));
+    if (identifier.length < 6) return null;
+    return (
+      stock.find(
+        (item) =>
+          item.kind === "Equipo" &&
+          item.inventoryItemId &&
+          !cart.some((cartItem) => cartItem.id === item.id) &&
+          [item.imei, item.id]
+            .filter(Boolean)
+            .some((value) => normalizeIdentifier(value ?? "") === identifier),
+      ) ?? null
+    );
+  }, [cart, query, stock]);
+  const selectEquipmentByIdentifier = (rawValue: string) => {
+    const captured = identifierFromScan(rawValue);
+    const identifier = normalizeIdentifier(captured);
+    const item = stock.find(
+      (candidate) =>
+        candidate.kind === "Equipo" &&
+        candidate.inventoryItemId &&
+        !cart.some((cartItem) => cartItem.id === candidate.id) &&
+        [candidate.imei, candidate.id]
+          .filter(Boolean)
+          .some((value) => normalizeIdentifier(value ?? "") === identifier),
+    );
+    if (!item) {
+      setQuery(captured);
+      setMobileSaleView("products");
+      setNotice(
+        "No encontramos ese IMEI disponible en esta sede. Verifica el código o busca por modelo.",
+      );
+      return;
+    }
+    addToCart(item);
+    setQuery("");
+    setMobileSaleView("checkout");
+    setNotice(
+      `${item.name}${item.variant ? ` · ${item.variant}` : ""} fue seleccionado por IMEI.`,
+    );
+  };
+  const suggestedAccessories = useMemo(
+    () =>
+      cart.some((item) => item.kind === "Equipo")
+        ? saleItems
+            .filter(
+              (item) =>
+                item.kind === "Accesorio" &&
+                isChargingAccessory(item) &&
+                !cart.some(
+                  (cartItem) =>
+                    cartItem.kind === "Accesorio" &&
+                    cartItem.productId === item.productId,
+                ),
+            )
+            .slice(0, 4)
+        : [],
+    [cart, saleItems],
+  );
   const total = calculateCartTotal(cart);
   const paid = paymentTotal(payments);
   if (!supabase) return <SetupNeeded />;
@@ -1396,9 +1503,39 @@ export default function Home() {
                     <input
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Buscar producto"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && matchingIdentifierItem) {
+                          event.preventDefault();
+                          selectEquipmentByIdentifier(query);
+                        }
+                      }}
+                      placeholder="Modelo, GB, IMEI o código"
                     />
                   </label>
+                  <div className="sale-scan-action">
+                    <ImeiCameraScanner
+                      onDetected={(value) => selectEquipmentByIdentifier(value)}
+                    />
+                  </div>
+                  {matchingIdentifierItem && (
+                    <button
+                      className="imei-match"
+                      type="button"
+                      onClick={() => selectEquipmentByIdentifier(query)}
+                    >
+                      <span>✓</span>
+                      <div>
+                        <strong>{matchingIdentifierItem.name}</strong>
+                        <small>
+                          {matchingIdentifierItem.variant
+                            ? `${matchingIdentifierItem.variant} · `
+                            : ""}
+                          IMEI {matchingIdentifierItem.imei}
+                        </small>
+                      </div>
+                      <b>Seleccionar</b>
+                    </button>
+                  )}
                   <div className="sale-products">
                     {saleItems.map((item) => (
                       <button
@@ -1406,13 +1543,42 @@ export default function Home() {
                         key={`${item.kind}:${item.productId}`}
                         onClick={() => addSaleItemToCart(item)}
                       >
-                        <strong>{item.name}</strong>
+                        <ProductThumbnail item={item} />
+                        <span className="sale-product-copy">
+                          <strong>{item.name}</strong>
+                          {item.variant && <em>{item.variant}</em>}
+                        </span>
                         <small>
                           {money.format(item.price)} · {item.availableQty} disp.
                         </small>
                       </button>
                     ))}
                   </div>
+                  {suggestedAccessories.length > 0 && (
+                    <section className="accessory-suggestions">
+                      <div>
+                        <p className="eyebrow">COMPLEMENTOS SUGERIDOS</p>
+                        <h3>¿Agregar cargador o cable?</h3>
+                        <p>Se muestran como sugerencia; elige solo lo que solicite el cliente.</p>
+                      </div>
+                      <div className="accessory-suggestion-list">
+                        {suggestedAccessories.map((item) => (
+                          <button
+                            type="button"
+                            key={item.productId}
+                            onClick={() => addSaleItemToCart(item)}
+                          >
+                            <span>＋</span>
+                            <div>
+                              <strong>{item.name}</strong>
+                              <small>{item.variant ?? item.detail}</small>
+                            </div>
+                            <b>{money.format(item.price)}</b>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                 </>
               ) : (
                 <section className="card sales-history-card">
@@ -1506,13 +1672,24 @@ export default function Home() {
                   {cart.length ? (
                     cart.map((item) => (
                       <div key={item.id}>
+                        {item.kind === "Equipo" && (
+                          <ProductThumbnail item={item} compact />
+                        )}
                         <span>
                           {item.name}
                           <small>
                             {item.qty} × {money.format(item.price)}
                           </small>
                         </span>
-                        <b>{money.format(item.price * item.qty)}</b>
+                        <span className="cart-line-total">
+                          {item.kind === "Equipo" && (
+                            <small className="equipment-identifier">
+                              {item.variant ? `${item.variant} · ` : ""}
+                              {item.detail}
+                            </small>
+                          )}
+                          <b>{money.format(item.price * item.qty)}</b>
+                        </span>
                         {item.kind === "Accesorio" && (
                           <span className="quantity">
                             <button
@@ -1814,6 +1991,44 @@ function Metric({
       <strong>{value}</strong>
       <small>{note}</small>
     </section>
+  );
+}
+
+function ProductThumbnail({
+  item,
+  compact = false,
+}: {
+  item: StockItem;
+  compact?: boolean;
+}) {
+  const supabase = getSupabaseBrowser();
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase || !item.photoPath) return;
+    let active = true;
+    void supabase.storage
+      .from("thor-files")
+      .createSignedUrl(item.photoPath, 60 * 60)
+      .then(({ data }) => {
+        if (active) setUrl(data?.signedUrl ?? null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.photoPath, supabase]);
+
+  return (
+    <span className={`product-thumbnail ${compact ? "compact" : ""}`}>
+      {item.photoPath && url ? (
+        <img
+          src={url}
+          alt={`Foto de ${item.name}${item.variant ? ` ${item.variant}` : ""}`}
+        />
+      ) : (
+        <span aria-hidden="true">{item.kind === "Equipo" ? "▣" : "⌁"}</span>
+      )}
+    </span>
   );
 }
 
@@ -5104,6 +5319,7 @@ function ManualCenter({
             "Atender con rapidez y confirmar cada venta sin perder el control del stock.",
           steps: [
             "Abre tu caja con el fondo inicial antes de iniciar ventas.",
+            "Busca por modelo, capacidad (GB), IMEI o código. Para un equipo específico, usa Escanear IMEI o escríbelo y selecciónalo.",
             "Busca el producto por nombre, IMEI o código.",
             "Agrega los artículos, identifica al cliente cuando corresponda y registra el pago.",
             "Confirma la venta solo cuando el total esté pagado.",
