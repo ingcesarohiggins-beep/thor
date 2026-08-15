@@ -4097,18 +4097,37 @@ function UserCenter({
 
   const loadUsers = useCallback(async () => {
     if (!supabase) return;
-    const [userResult, locationResult] = await Promise.all([
-      supabase
+    const userResult = await supabase
+      .from("app_users")
+      .select("id, name, email, role, active, avatar_path, locations(name)")
+      .order("created_at", { ascending: true });
+    const locationResult = await supabase
+      .from("locations")
+      .select("id, name")
+      .eq("active", true);
+
+    // Permite administrar usuarios en instalaciones antiguas mientras se aplica
+    // la migración de fotos de perfil. No oculta el fallo de permisos u otros datos.
+    let userError = userResult.error;
+    let userData = userResult.data as ManagedUser[] | null;
+    if (userError?.message.includes("avatar_path")) {
+      const fallback = await supabase
         .from("app_users")
-        .select("id, name, email, role, active, avatar_path, locations(name)")
-        .order("created_at", { ascending: true }),
-      supabase.from("locations").select("id, name").eq("active", true),
-    ]);
-    if (userResult.error || locationResult.error) {
+        .select("id, name, email, role, active, locations(name)")
+        .order("created_at", { ascending: true });
+      userError = fallback.error;
+      userData = (fallback.data ?? []).map((user) =>
+        ({
+          ...user,
+          avatar_path: null,
+        }) as ManagedUser,
+      );
+    }
+    if (userError || locationResult.error) {
       setMessage("No se pudieron cargar los usuarios.");
       return;
     }
-    setUsers((userResult.data ?? []) as ManagedUser[]);
+    setUsers(userData ?? []);
     setLocations(locationResult.data ?? []);
   }, [supabase]);
 
