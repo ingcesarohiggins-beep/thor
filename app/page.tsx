@@ -4097,20 +4097,33 @@ function UserCenter({
 
   const loadUsers = useCallback(async () => {
     if (!supabase) return;
-    const userResult = await supabase
-      .from("app_users")
-      .select("id, name, email, role, active, avatar_path, locations(name)")
-      .order("created_at", { ascending: true });
+    const managedResult = await supabase.rpc("get_thor_users");
     const locationResult = await supabase
       .from("locations")
       .select("id, name")
       .eq("active", true);
 
-    // Permite administrar usuarios en instalaciones antiguas mientras se aplica
-    // la migración de fotos de perfil. No oculta el fallo de permisos u otros datos.
-    let userError = userResult.error;
-    let userData = userResult.data as ManagedUser[] | null;
-    if (userError?.message.includes("avatar_path")) {
+    // La función evita variaciones de RLS en instalaciones antiguas. El acceso
+    // directo se conserva solo mientras se aplica esta migración.
+    let userError = managedResult.error;
+    let userData = (managedResult.data ?? []).map(
+      (user: {
+        id: string;
+        name: string;
+        email: string | null;
+        role: string;
+        active: boolean;
+        avatar_path: string | null;
+        location_name: string | null;
+      }) =>
+        ({
+          ...user,
+          role: user.role as UserRole,
+          avatar_path: user.avatar_path ?? null,
+          locations: user.location_name ? [{ name: user.location_name }] : [],
+        }) as ManagedUser,
+    );
+    if (userError?.message.includes("get_thor_users")) {
       const fallback = await supabase
         .from("app_users")
         .select("id, name, email, role, active, locations(name)")
@@ -4127,7 +4140,7 @@ function UserCenter({
       setMessage("No se pudieron cargar los usuarios.");
       return;
     }
-    setUsers(userData ?? []);
+    setUsers(userData);
     setLocations(locationResult.data ?? []);
   }, [supabase]);
 
