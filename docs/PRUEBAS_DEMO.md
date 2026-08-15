@@ -11,6 +11,8 @@ Ejecuta en Supabase SQL Editor, en este orden, las migraciones:
 2. `migrations/202608040002_github_pages_access.sql`
 3. `migrations/202608060003_complete_sale.sql`
 4. `migrations/202608060006_admin_user_management.sql`
+5. Todas las migraciones posteriores en orden numérico, hasta
+   `migrations/202608140001_catalog_template_audit.sql`.
 
 En **Edge Functions**, despliega `functions/create-thor-user/index.ts`. Despues
 en **Authentication > URL Configuration**, agrega:
@@ -55,6 +57,8 @@ Actualiza THOR con `Ctrl + F5` y entra por
    exactamente en dos unidades.
 7. **Caja y recuperacion:** abre/cierra una sesion de caja y solicita el
    cambio de contrasena para una cuenta DEMO.
+8. **Bitacora:** como Superadministrador, abre **Usuarios** y verifica que la
+   actividad y las acciones de catálogo, lotes y confirmaciones estén visibles.
 
 No mezcles productos DEMO con productos reales en una misma venta.
 

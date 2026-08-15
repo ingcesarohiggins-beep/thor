@@ -1746,6 +1746,17 @@ function CatalogCenter() {
       .filter(Boolean);
     if (!brand || !name || !options.length)
       return setMessage("Completa marca, modelo y al menos una variante.");
+    if (
+      templates.some(
+        (item) =>
+          item.brand.toLocaleLowerCase() === brand.toLocaleLowerCase() &&
+          item.name.toLocaleLowerCase() === name.toLocaleLowerCase() &&
+          item.category === category,
+      )
+    )
+      return setMessage(
+        "Ese modelo ya existe en el catálogo. Selecciónalo y crea solo la capacidad o potencia que necesites.",
+      );
     setSaving(true);
     setMessage("");
     try {
@@ -4405,9 +4416,9 @@ function ManualCenter({
             name: "Administrador",
             purpose: "Mantener la operación de la sede ordenada y verificable.",
             steps: [
-              "Registra equipos con sus datos, costo, precio y evidencia.",
-              "Revisa ventas, movimientos y diferencias de caja.",
-              "Aprueba los cambios que requieran control administrativo.",
+              "Crea el producto en Catálogo y recíbelo desde Compras con su lote, factura e IMEI.",
+              "Revisa ventas, movimientos, lotes y diferencias de caja por sede.",
+              "Confirma pagos inmediatos y conserva la evidencia de cada recepción.",
             ],
             action: "Ir a ventas",
           }
@@ -4468,6 +4479,11 @@ function ManualCenter({
     [
       "Compras y lotes",
       "Recibe mercadería por factura, registra accesorios por cantidad y equipos por IMEI, con pago inmediato y trazabilidad de proveedor.",
+      "Activo",
+    ],
+    [
+      "Bitácora",
+      "El Superadministrador consulta usuarios activos y las acciones relevantes: sesiones, catálogo, lotes, pagos y confirmaciones.",
       "Activo",
     ],
     [
