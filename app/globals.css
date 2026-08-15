@@ -1165,6 +1165,56 @@ p {
   color: var(--ink);
   background: #fff;
 }
+.expense-category-manager {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+}
+.expense-category-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #dae5dd;
+  border-radius: 10px;
+  background: #f8fbf9;
+}
+.expense-category-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.expense-category-panel form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.expense-category-panel input {
+  min-width: 0;
+  border: 1px solid #dce0dc;
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #fff;
+}
+.expense-category-list {
+  display: grid;
+  gap: 3px;
+  max-height: 190px;
+  overflow: auto;
+}
+.expense-category-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid #e6ece8;
+  color: #405049;
+  font-size: 12px;
+}
+.expense-category-list > div:last-child { border-bottom: 0; }
 .cash-list {
   margin-top: 10px;
 }
@@ -2895,6 +2945,8 @@ button:disabled {
   .catalog-product-picker { padding: 13px; }
   .catalog-help { justify-items: start; }
   .purchase-submit .secondary { width: 100%; min-height: 46px; }
+  .expense-category-panel form { grid-template-columns: 1fr; }
+  .expense-category-panel form .secondary { width: 100%; }
   input, select, textarea { font-size: 16px; }
   .scanner-panel { padding: 16px; border-radius: 14px; }
   .scanner-panel video { min-height: 200px; }

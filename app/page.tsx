@@ -73,6 +73,12 @@ type ExpenseRecord = {
   payment_method: string;
   expense_date: string;
 };
+type ExpenseCategory = {
+  id: string;
+  name: string;
+  active: boolean;
+  sort_order: number;
+};
 type UserRole = "superadmin" | "admin" | "seller";
 type Payment = { method: string; amount: number | "" };
 type Customer = { name: string; dni: string; phone: string; address: string };
@@ -162,6 +168,18 @@ const money = new Intl.NumberFormat("es-PE", {
 });
 const emptyCustomer: Customer = { name: "", dni: "", phone: "", address: "" };
 const newPayment = (): Payment => ({ method: "Efectivo", amount: "" });
+const defaultExpenseCategories = [
+  "Alquiler y servicios",
+  "Transporte y movilidad",
+  "Flete local",
+  "Empaque e insumos",
+  "Mantenimiento y reparación",
+  "Marketing y publicidad",
+  "Servicios digitales",
+  "Sueldos y adelantos",
+  "Impuestos y comisiones",
+  "Otros operativos",
+];
 const newPurchaseLine = (): PurchaseLine => ({
   productId: "",
   sku: "",
@@ -3565,12 +3583,14 @@ function CashCenter({
   const supabase = getSupabaseBrowser();
   const [sessions, setSessions] = useState<CashSession[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase || !actor) return;
-    const [sessionResult, expenseResult] = await Promise.all([
+    const [sessionResult, expenseResult, categoryResult] = await Promise.all([
       supabase
         .from("cash_sessions")
         .select(
@@ -3587,6 +3607,11 @@ function CashCenter({
         .eq("location_id", actor.locationId)
         .order("expense_date", { ascending: false })
         .limit(8),
+      supabase
+        .from("expense_categories")
+        .select("id, name, active, sort_order")
+        .order("sort_order")
+        .order("name"),
     ]);
     if (sessionResult.error || expenseResult.error) {
       setMessage("No se pudo cargar el detalle de caja.");
@@ -3594,6 +3619,11 @@ function CashCenter({
     }
     setSessions((sessionResult.data ?? []) as CashSession[]);
     setExpenses((expenseResult.data ?? []) as ExpenseRecord[]);
+    if (categoryResult.error) {
+      setExpenseCategories([]);
+    } else {
+      setExpenseCategories((categoryResult.data ?? []) as ExpenseCategory[]);
+    }
   }, [actor, supabase]);
 
   useEffect(() => {
@@ -3608,6 +3638,9 @@ function CashCenter({
     (session) => !session.closed_at && session.opened_by === actor.id,
   );
   const canManageExpenses = actor.role !== "seller";
+  const selectableExpenseCategories = expenseCategories.length
+    ? expenseCategories.filter((category) => category.active).map((category) => category.name)
+    : defaultExpenseCategories;
 
   const saveOpening = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -3669,6 +3702,40 @@ function CashCenter({
     event.currentTarget.reset();
     setMessage("Gasto registrado correctamente.");
     await Promise.all([load(), onChanged()]);
+  };
+
+  const createExpenseCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!supabase || actor.role !== "superadmin") return;
+    const name = String(new FormData(event.currentTarget).get("name") ?? "").trim();
+    if (!name) return;
+    setSaving(true);
+    const result = await supabase.from("expense_categories").insert({
+      name,
+      sort_order: (expenseCategories.at(-1)?.sort_order ?? 0) + 10,
+    });
+    setSaving(false);
+    if (result.error) return setMessage(result.error.message);
+    event.currentTarget.reset();
+    setMessage("Categoría de egreso creada.");
+    await load();
+  };
+
+  const toggleExpenseCategory = async (category: ExpenseCategory) => {
+    if (!supabase || actor.role !== "superadmin") return;
+    setSaving(true);
+    const result = await supabase
+      .from("expense_categories")
+      .update({ active: !category.active })
+      .eq("id", category.id);
+    setSaving(false);
+    if (result.error) return setMessage(result.error.message);
+    setMessage(
+      category.active
+        ? `Categoría ${category.name} desactivada para nuevos egresos.`
+        : `Categoría ${category.name} activada.`,
+    );
+    await load();
   };
 
   return (
@@ -3766,11 +3833,18 @@ function CashCenter({
           <p className="eyebrow">GASTO OPERATIVO</p>
           <h3>Registrar egreso</h3>
           {canManageExpenses ? (
+            <>
             <form className="cash-form" onSubmit={registerExpense}>
               <div className="two-fields">
                 <label>
                   Categoría
-                  <input name="category" defaultValue="Operativo" required />
+                  <select name="category" required>
+                    {selectableExpenseCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   Monto (S/)
@@ -3814,6 +3888,58 @@ function CashCenter({
                 Registrar gasto
               </button>
             </form>
+            {actor.role === "superadmin" && (
+              <div className="expense-category-manager">
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => setShowCategoryManager((current) => !current)}
+                >
+                  {showCategoryManager
+                    ? "Ocultar categorías"
+                    : "Gestionar categorías de egreso"}
+                </button>
+                {showCategoryManager && (
+                  <div className="expense-category-panel">
+                    <p>
+                      Estas opciones son fijas para registrar. Puedes añadir una
+                      nueva o desactivar una sin alterar los egresos históricos.
+                    </p>
+                    <form onSubmit={createExpenseCategory}>
+                      <input
+                        name="name"
+                        maxLength={80}
+                        placeholder="Nueva categoría"
+                        required
+                      />
+                      <button className="secondary" disabled={saving}>
+                        Añadir
+                      </button>
+                    </form>
+                    <div className="expense-category-list">
+                      {expenseCategories.length ? (
+                        expenseCategories.map((category) => (
+                          <div key={category.id}>
+                            <span>{category.name}</span>
+                            <button
+                              className="text-button"
+                              type="button"
+                              onClick={() => void toggleExpenseCategory(category)}
+                              disabled={saving}
+                            >
+                              {category.active ? "Desactivar" : "Activar"}
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <p>Ejecuta la migración de categorías para administrarlas desde aquí.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            </>
           ) : (
             <p className="empty">Los gastos los registra un administrador.</p>
           )}
@@ -4838,8 +4964,8 @@ function ManualCenter({
     ],
     [
       "Caja",
-      "Consultar el resumen diario de ventas y gastos de la sede.",
-      "En evolución",
+      "Abre y cierra caja, consulta el resumen diario y registra egresos con categorías controladas. Solo el Superadministrador administra las categorías.",
+      "Activo",
     ],
     [
       "Documentación",
