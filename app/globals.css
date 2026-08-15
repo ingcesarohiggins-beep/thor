@@ -2404,6 +2404,29 @@ p {
   font-size: 11px;
   font-weight: 400;
 }
+.device-entry-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.device-entry-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.device-entry {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #dbe5df;
+  border-radius: 10px;
+  background: #fbfdfb;
+}
+.device-entry > strong {
+  color: #385148;
+  font-size: 12px;
+}
 .line-subtotal {
   display: flex;
   justify-content: flex-end;
