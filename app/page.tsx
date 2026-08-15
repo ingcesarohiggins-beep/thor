@@ -174,6 +174,109 @@ const newPurchaseLine = (): PurchaseLine => ({
   itemPhoto: null,
 });
 
+const IMAGE_UPLOAD_TARGET_BYTES = 900 * 1024;
+const IMAGE_UPLOAD_MAX_DIMENSION = 2048;
+
+function fileSizeLabel(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function loadImageFile(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("No se pudo leer la foto."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("No se pudo optimizar la foto."))),
+      "image/jpeg",
+      quality,
+    );
+  });
+}
+
+async function optimizeImageForUpload(file: File) {
+  if (!file.type.startsWith("image/") || file.size <= IMAGE_UPLOAD_TARGET_BYTES)
+    return file;
+
+  const image = await loadImageFile(file);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  let scale = Math.min(
+    1,
+    IMAGE_UPLOAD_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight),
+  );
+  let quality = 0.9;
+  let result: Blob | null = null;
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("No se pudo preparar la foto.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    result = await canvasToJpeg(canvas, quality);
+    if (result.size <= IMAGE_UPLOAD_TARGET_BYTES) break;
+    scale *= 0.78;
+    quality = Math.max(0.58, quality - 0.05);
+  }
+
+  if (!result || result.size > 1024 * 1024)
+    throw new Error("No se pudo reducir la foto a un tamaño seguro para subir.");
+
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "foto";
+  return new File([result], `${baseName}-optimizada.jpg`, {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
+let imeiAudioContext: AudioContext | null = null;
+
+function primeImeiAudio() {
+  try {
+    imeiAudioContext ??= new AudioContext();
+    void imeiAudioContext.resume();
+  } catch {
+    // Audio is optional; scanning continues on devices that block it.
+  }
+}
+
+function playImeiConfirmation() {
+  try {
+    const audio = imeiAudioContext ?? new AudioContext();
+    imeiAudioContext = audio;
+    void audio.resume();
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(1046.5, audio.currentTime);
+    gain.gain.setValueAtTime(0.0001, audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.16, audio.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.2);
+    oscillator.connect(gain).connect(audio.destination);
+    oscillator.start();
+    oscillator.stop(audio.currentTime + 0.21);
+    navigator.vibrate?.(45);
+  } catch {
+    // A blocked audio context should never interrupt the IMEI capture.
+  }
+}
+
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("inicio");
@@ -1954,6 +2057,7 @@ function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
     if (!open) return;
     let stream: MediaStream | null = null;
     let stopped = false;
+    let detected = false;
     let timer = 0;
     const start = async () => {
       const Detector = (
@@ -1981,7 +2085,9 @@ function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
           const value = codes
             .find((code) => code.rawValue?.trim())
             ?.rawValue?.trim();
-          if (value) {
+          if (value && !detected) {
+            detected = true;
+            playImeiConfirmation();
             onDetected(value);
             setOpen(false);
             return;
@@ -2010,6 +2116,7 @@ function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
         type="button"
         onClick={() => {
           setMessage("");
+          primeImeiAudio();
           setOpen(true);
         }}
       >
@@ -2040,6 +2147,7 @@ function ImeiCameraScanner({ onDetected }: { onDetected: (value: string) => void
   useEffect(() => {
     if (!open) return;
     let stopped = false;
+    let detected = false;
     let controls: { stop: () => void } | null = null;
     const start = async () => {
       try {
@@ -2058,7 +2166,9 @@ function ImeiCameraScanner({ onDetected }: { onDetected: (value: string) => void
           videoRef.current,
           (result) => {
             const value = result?.getText().trim();
-            if (value && !stopped) {
+            if (value && !stopped && !detected) {
+              detected = true;
+              playImeiConfirmation();
               onDetected(value);
               setOpen(false);
             }
@@ -2084,6 +2194,7 @@ function ImeiCameraScanner({ onDetected }: { onDetected: (value: string) => void
         type="button"
         onClick={() => {
           setMessage("");
+          primeImeiAudio();
           setOpen(true);
         }}
       >
@@ -2164,6 +2275,8 @@ function PurchaseCenter({
     Array<{ sku: string; name: string; quantity: number; amount: number }>
   >([]);
   const [saving, setSaving] = useState(false);
+  const [optimizingPhoto, setOptimizingPhoto] = useState(false);
+  const [fileNotice, setFileNotice] = useState("");
   const [message, setMessage] = useState("");
 
   const loadPurchaseSetup = useCallback(async () => {
@@ -2242,8 +2355,54 @@ function PurchaseCenter({
     );
   };
 
+  const prepareSelectedImage = async (
+    file: File | null,
+    target: "receipt" | "item",
+  ) => {
+    if (!file) {
+      if (target === "receipt") setInvoice(null);
+      else setLine((current) => ({ ...current, itemPhoto: null }));
+      setFileNotice("");
+      return;
+    }
+
+    if (target === "receipt" && !file.type.startsWith("image/")) {
+      setInvoice(file);
+      setFileNotice(`Comprobante ${file.name} listo para subir.`);
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setMessage("La evidencia del equipo debe ser una imagen.");
+      return;
+    }
+
+    setOptimizingPhoto(true);
+    setFileNotice("Optimizando foto para subirla sin perder nitidez...");
+    try {
+      const optimized = await optimizeImageForUpload(file);
+      if (target === "receipt") setInvoice(optimized);
+      else setLine((current) => ({ ...current, itemPhoto: optimized }));
+      setFileNotice(
+        optimized === file
+          ? `Foto lista: ${fileSizeLabel(file.size)}.`
+          : `Foto optimizada: ${fileSizeLabel(file.size)} a ${fileSizeLabel(optimized.size)}.`,
+      );
+    } catch (error) {
+      setFileNotice("");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo optimizar la foto. Prueba otra imagen.",
+      );
+    } finally {
+      setOptimizingPhoto(false);
+    }
+  };
+
   const createLot = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (optimizingPhoto)
+      return setMessage("Espera un momento: estamos optimizando la foto.");
     if (!supabase || !supplierId || !receiptNumber.trim())
       return setMessage("Selecciona proveedor e ingresa factura o guía.");
     setSaving(true);
@@ -2251,12 +2410,15 @@ function PurchaseCenter({
     try {
       let invoicePath = "";
       if (invoice) {
-        const extension = invoice.name.split(".").pop() || "jpg";
+        const invoiceFile = invoice.type.startsWith("image/")
+          ? await optimizeImageForUpload(invoice)
+          : invoice;
+        const extension = invoiceFile.name.split(".").pop() || "jpg";
         invoicePath = `receipts/${actor.id}/${crypto.randomUUID()}.${extension}`;
         const upload = await supabase.storage
           .from("thor-files")
-          .upload(invoicePath, invoice, {
-            contentType: invoice.type || "image/jpeg",
+          .upload(invoicePath, invoiceFile, {
+            contentType: invoiceFile.type || "image/jpeg",
           });
         if (upload.error) throw upload.error;
       }
@@ -2333,6 +2495,8 @@ function PurchaseCenter({
   const addLine = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !draft) return;
+    if (optimizingPhoto)
+      return setMessage("Espera un momento: estamos optimizando la foto.");
     const identifiers = line.identifiers
       .split(/[\n,]+/)
       .map((value) => value.trim())
@@ -2358,21 +2522,18 @@ function PurchaseCenter({
       );
     if (line.itemPhoto && !line.itemPhoto.type.startsWith("image/"))
       return setMessage("La foto del equipo debe ser una imagen.");
-    if (line.itemPhoto && line.itemPhoto.size > 1024 * 1024)
-      return setMessage(
-        "La foto del equipo supera 1 MB. Usa una foto nítida, pero más ligera.",
-      );
     setSaving(true);
     setMessage("");
     let itemPhotoPath = "";
     try {
       if (line.itemPhoto) {
-        const extension = line.itemPhoto.type.split("/")[1] || "jpg";
+        const itemPhoto = await optimizeImageForUpload(line.itemPhoto);
+        const extension = itemPhoto.type.split("/")[1] || "jpg";
         itemPhotoPath = `inventory/${actor.id}/${crypto.randomUUID()}.${extension}`;
         const upload = await supabase.storage
           .from("thor-files")
-          .upload(itemPhotoPath, line.itemPhoto, {
-            contentType: line.itemPhoto.type,
+          .upload(itemPhotoPath, itemPhoto, {
+            contentType: itemPhoto.type,
           });
         if (upload.error) throw upload.error;
       }
@@ -2521,6 +2682,24 @@ function PurchaseCenter({
           <small>{draft ? "Factura + flete" : "Stock separado por sede"}</small>
         </div>
       </section>
+      {draft && (
+        <div className="purchase-quick-confirm" aria-label="Resumen del lote activo">
+          <div>
+            <span>Lote {draft.code}</span>
+            <strong>
+              {savedLines.length} productos · {money.format(invoiceTotal + freightValue)}
+            </strong>
+          </div>
+          <button
+            className="primary"
+            type="button"
+            onClick={() => void confirmLot()}
+            disabled={saving || !savedLines.length}
+          >
+            Confirmar lote
+          </button>
+        </div>
+      )}
       {!draft ? (
         <form className="purchase-form" id="new-purchase" onSubmit={createLot}>
           <section className="card purchase-header-card">
@@ -2582,10 +2761,15 @@ function PurchaseCenter({
                   accept="image/*,.pdf"
                   capture="environment"
                   onChange={(event) =>
-                    setInvoice(event.target.files?.[0] ?? null)
+                    void prepareSelectedImage(
+                      event.target.files?.[0] ?? null,
+                      "receipt",
+                    )
                   }
                 />
-                <small>En celular abre la cámara para foto de factura.</small>
+                <small>
+                  En celular abre la cámara. Las fotos se optimizan automáticamente antes de subirlas.
+                </small>
               </label>
               <label>
                 Flete (S/)
@@ -2628,6 +2812,11 @@ function PurchaseCenter({
                 />
               </label>
             </div>
+            {fileNotice && (
+              <p className="file-notice" role="status">
+                {fileNotice}
+              </p>
+            )}
             {(paymentMethod.includes("cash") ||
               (freightValue > 0 && freightMethod.includes("cash"))) &&
               !cashOpen && (
@@ -2641,7 +2830,11 @@ function PurchaseCenter({
                 <span>Pago de factura</span>
                 <strong>{methodLabel(paymentMethod)}</strong>
               </div>
-              <button className="primary" type="submit" disabled={saving}>
+              <button
+                className="primary"
+                type="submit"
+                disabled={saving || optimizingPhoto}
+              >
                 {saving ? "Creando lote..." : "Crear lote y agregar productos"}
               </button>
             </div>
@@ -2787,18 +2980,23 @@ function PurchaseCenter({
                       accept="image/*"
                       capture="environment"
                       onChange={(event) =>
-                        setLine({
-                          ...line,
-                          itemPhoto: event.target.files?.[0] ?? null,
-                        })
+                        void prepareSelectedImage(
+                          event.target.files?.[0] ?? null,
+                          "item",
+                        )
                       }
                       required
                     />
                     <small>
-                      Cámara o galería. Máximo 1 MB; se guarda junto al IMEI.
+                      Cámara o galería. Se optimiza automáticamente a menos de 1 MB y se guarda junto al IMEI.
                     </small>
                   </label>
                 </div>
+              )}
+              {fileNotice && (
+                <p className="file-notice" role="status">
+                  {fileNotice}
+                </p>
               )}
               <div className="purchase-submit">
                 <div>
@@ -2809,7 +3007,11 @@ function PurchaseCenter({
                     )}
                   </strong>
                 </div>
-                <button className="secondary" type="submit" disabled={saving}>
+                <button
+                  className="secondary"
+                  type="submit"
+                  disabled={saving || optimizingPhoto}
+                >
                   Agregar al lote
                 </button>
               </div>
@@ -4668,7 +4870,7 @@ function ManualCenter({
     ],
     [
       "Compras y lotes",
-      "Recibe mercadería por factura: accesorios por cantidad y equipos por IMEI. Para equipos se exige una foto por unidad; la cámara o galería funciona también desde el celular.",
+      "Recibe mercadería por factura: accesorios por cantidad y equipos por IMEI. Para equipos se exige una foto por unidad; en celular la foto se optimiza automáticamente antes de subir y el lector confirma la captura con una señal sonora.",
       "Activo",
     ],
     [
