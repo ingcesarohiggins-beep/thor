@@ -12,7 +12,7 @@ Ejecuta en Supabase SQL Editor, en este orden, las migraciones:
 3. `migrations/202608060003_complete_sale.sql`
 4. `migrations/202608060006_admin_user_management.sql`
 5. Todas las migraciones posteriores en orden numérico, hasta
-   `migrations/202608140001_catalog_template_audit.sql`.
+   `migrations/202608140002_device_photos.sql`.
 
 En **Edge Functions**, despliega `functions/create-thor-user/index.ts`. Despues
 en **Authentication > URL Configuration**, agrega:

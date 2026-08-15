@@ -32,6 +32,7 @@ type StockItem = {
   id: string;
   inventoryItemId?: string;
   productId: string;
+  photoPath?: string | null;
   name: string;
   detail: string;
   price: number;
@@ -101,6 +102,7 @@ type PurchaseLine = {
   unit_cost: number | "";
   sale_price: number | "";
   identifiers: string;
+  itemPhoto: File | null;
 };
 type CatalogProduct = {
   id: string;
@@ -169,6 +171,7 @@ const newPurchaseLine = (): PurchaseLine => ({
   unit_cost: "",
   sale_price: "",
   identifiers: "",
+  itemPhoto: null,
 });
 
 export default function Home() {
@@ -388,7 +391,7 @@ export default function Home() {
       await Promise.all([
         supabase
           .from("inventory_items")
-          .select("id, code, product_id, imei_1, serial, products!inner(name)")
+          .select("id, code, product_id, imei_1, serial, photo_path, products!inner(name)")
           .eq("location_id", locationId)
           .eq("status", "available"),
         supabase
@@ -448,6 +451,7 @@ export default function Home() {
         id: item.code,
         inventoryItemId: item.id,
         productId: item.product_id,
+        photoPath: item.photo_path,
         name: (item.products as unknown as { name: string }).name,
         detail: item.imei_1
           ? `IMEI terminado en ${item.imei_1.slice(-4)}`
@@ -2249,9 +2253,34 @@ function PurchaseCenter({
       return setMessage(
         "La cantidad debe coincidir con los IMEI o series ingresados.",
       );
+    if (line.category !== "accessory" && Number(line.quantity) !== 1)
+      return setMessage(
+        "Para conservar una foto por equipo, registra los celulares de uno en uno.",
+      );
+    if (line.category !== "accessory" && !line.itemPhoto)
+      return setMessage(
+        "Adjunta la foto individual del equipo antes de agregarlo al lote.",
+      );
+    if (line.itemPhoto && !line.itemPhoto.type.startsWith("image/"))
+      return setMessage("La foto del equipo debe ser una imagen.");
+    if (line.itemPhoto && line.itemPhoto.size > 1024 * 1024)
+      return setMessage(
+        "La foto del equipo supera 1 MB. Usa una foto nítida, pero más ligera.",
+      );
     setSaving(true);
     setMessage("");
+    let itemPhotoPath = "";
     try {
+      if (line.itemPhoto) {
+        const extension = line.itemPhoto.type.split("/")[1] || "jpg";
+        itemPhotoPath = `inventory/${actor.id}/${crypto.randomUUID()}.${extension}`;
+        const upload = await supabase.storage
+          .from("thor-files")
+          .upload(itemPhotoPath, line.itemPhoto, {
+            contentType: line.itemPhoto.type,
+          });
+        if (upload.error) throw upload.error;
+      }
       const result = await supabase.rpc("add_catalog_product_to_lot", {
         p_lot_id: draft.id,
         p_product_id: line.productId,
@@ -2259,6 +2288,7 @@ function PurchaseCenter({
         p_unit_cost: Number(line.unit_cost),
         p_sale_price: Number(line.sale_price),
         p_identifiers: identifiers,
+        p_item_photo_paths: itemPhotoPath ? [itemPhotoPath] : [],
       });
       if (result.error) throw result.error;
       setSavedLines((current) => [
@@ -2275,6 +2305,8 @@ function PurchaseCenter({
         "Producto agregado al lote. Puedes añadir otro o confirmar la recepción.",
       );
     } catch (error) {
+      if (itemPhotoPath)
+        await supabase.storage.from("thor-files").remove([itemPhotoPath]);
       setMessage(
         error instanceof Error
           ? error.message
@@ -2630,21 +2662,20 @@ function PurchaseCenter({
                 </label>
               </div>
               {line.category !== "accessory" && (
-                <label className="identifiers-field">
+                <div className="device-evidence-grid">
+                  <label className="identifiers-field">
                   <span className="imei-label">
                     IMEI o serie{" "}
                     <ImeiScanner
                       onDetected={(value) =>
                         setLine((current) => ({
                           ...current,
-                          identifiers: current.identifiers
-                            ? `${current.identifiers}\n${value}`
-                            : value,
+                          identifiers: value,
                         }))
                       }
                     />
                   </span>
-                  <textarea
+                  <input
                     value={line.identifiers}
                     inputMode="numeric"
                     onChange={(event) =>
@@ -2653,7 +2684,26 @@ function PurchaseCenter({
                     placeholder="Uno por línea o separado por comas."
                     required
                   />
-                </label>
+                  </label>
+                  <label className="identifiers-field">
+                    Foto individual del equipo
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(event) =>
+                        setLine({
+                          ...line,
+                          itemPhoto: event.target.files?.[0] ?? null,
+                        })
+                      }
+                      required
+                    />
+                    <small>
+                      Cámara o galería. Máximo 1 MB; se guarda junto al IMEI.
+                    </small>
+                  </label>
+                </div>
               )}
               <div className="purchase-submit">
                 <div>

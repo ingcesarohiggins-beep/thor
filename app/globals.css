@@ -2238,6 +2238,7 @@ p {
 .purchase-fields select,
 .purchase-line input,
 .purchase-line select,
+.identifiers-field input,
 .identifiers-field textarea {
   min-height: 42px;
   width: 100%;
@@ -2309,6 +2310,24 @@ p {
   min-height: 75px;
   resize: vertical;
 }
+.device-evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.device-evidence-grid .identifiers-field {
+  margin: 0;
+}
+.device-evidence-grid input[type="file"] {
+  padding: 8px;
+  min-height: 42px;
+}
+.device-evidence-grid small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
 .line-subtotal {
   display: flex;
   justify-content: flex-end;
@@ -2370,7 +2389,8 @@ p {
     width: 100%;
   }
   .purchase-fields,
-  .purchase-line-grid {
+  .purchase-line-grid,
+  .device-evidence-grid {
     grid-template-columns: 1fr;
   }
   .purchase-wide {
