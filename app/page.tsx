@@ -202,6 +202,15 @@ function fileSizeLabel(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function readableError(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 function loadImageFile(file: File) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
@@ -2583,9 +2592,7 @@ function PurchaseCenter({
         `Lote ${data.code} creado. Ahora agrega los productos que llegaron.`,
       );
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "No se pudo crear el lote.",
-      );
+      setMessage(readableError(error, "No se pudo crear el lote."));
     } finally {
       setSaving(false);
     }
@@ -2706,11 +2713,7 @@ function PurchaseCenter({
     } catch (error) {
       if (itemPhotoPaths.length)
         await supabase.storage.from("thor-files").remove(itemPhotoPaths);
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo agregar el producto.",
-      );
+      setMessage(readableError(error, "No se pudo agregar el producto."));
     } finally {
       setSaving(false);
     }
@@ -2731,6 +2734,10 @@ function PurchaseCenter({
     setSaving(true);
     setMessage("");
     try {
+      const validation = await supabase.rpc("validate_receipt_lot_identifiers", {
+        p_lot_id: draft.id,
+      });
+      if (validation.error) throw validation.error;
       const result = await supabase.rpc("confirm_purchase_lot", {
         p_lot_id: draft.id,
       });
@@ -2753,11 +2760,7 @@ function PurchaseCenter({
       void loadPurchaseSetup();
       await onCompleted();
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo confirmar el lote.",
-      );
+      setMessage(readableError(error, "No se pudo confirmar el lote."));
     } finally {
       setSaving(false);
     }
