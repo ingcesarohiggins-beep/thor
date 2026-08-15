@@ -44,10 +44,10 @@ Actualiza THOR con `Ctrl + F5` y entra por
 
 ## 3. Pruebas de aceptacion
 
-1. **Superadmin:** crea un administrador DEMO y un vendedor DEMO desde
+1. **Superadmin:** crea un Gerente General DEMO y un vendedor DEMO desde
    Usuarios.
-2. **Administrador:** inicia sesion con esa cuenta. Debe poder crear solo
-   vendedores de su sede; no administradores.
+2. **Gerente General:** inicia sesion con esa cuenta. Debe poder crear solo
+   vendedores de su sede; no Gerentes Generales.
 3. **Vendedor:** confirma que puede ver inventario y completar una venta, pero
    no administrar usuarios.
 4. **Inventario y camara:** en Compras registra un equipo de prueba, añade su

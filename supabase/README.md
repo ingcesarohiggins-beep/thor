@@ -17,15 +17,15 @@ No publiques `SUPABASE_SERVICE_ROLE_KEY`: esa clave permite administrar toda la 
 
 1. Ejecuta `migrations/202608060006_admin_user_management.sql` en Supabase SQL Editor.
 2. En Supabase CLI despliega la funcion: `supabase functions deploy create-thor-user`.
-3. En THOR, el Superadmin crea vendedores o administradores desde **Usuarios**. Un Administrador solo crea vendedores.
+3. En THOR, el Superadministrador crea vendedores o Gerentes Generales desde **Usuarios**. Un Gerente General solo crea vendedores.
 
 La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las variables publicas de THOR.
 
 ## Almacenes, vendedores y caja
 
 1. Ejecuta tambien `migrations/202608130007_customers.sql` y `migrations/202608130008_cash_required_for_sales.sql` en el SQL Editor, en ese orden.
-2. El Superadministrador crea administradores y vendedores. El Administrador puede crear vendedores y asignarlos a cualquier almacén activo.
-3. Cada vendedor trabaja en el almacén asignado. El Administrador puede seleccionar el almacén que administra desde el menú lateral.
+2. El Superadministrador crea Gerentes Generales y vendedores. El Gerente General puede crear vendedores y asignarlos a cualquier almacén activo.
+3. Cada vendedor trabaja en el almacén asignado. El Gerente General puede seleccionar la sede operativa desde el menú lateral.
 4. Antes de confirmar una venta, cada persona debe abrir su propia caja y registrar su fondo inicial. THOR bloquea la venta en la pantalla y en la base de datos hasta que exista una caja abierta.
 5. Al terminar el turno, registra el efectivo contado y cierra la caja. Solo el Superadministrador puede cambiar roles o privilegios de usuarios.
 
@@ -39,7 +39,7 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 
 1. Ejecuta `migrations/202608130010_superadmin_activity_log.sql` después de todas las migraciones anteriores.
 2. La etiqueta verde **Conectado** en el menú lateral confirma que THOR está conectado a Supabase sin ocupar el área principal.
-3. En **Usuarios**, el Superadministrador verá usuarios conectados, tiempo desde el inicio de actividad, última señal y una bitácora. Administradores y vendedores no pueden consultar esos datos.
+3. En **Usuarios**, el Superadministrador verá usuarios conectados, tiempo desde el inicio de actividad, última señal y una bitácora. Gerentes Generales y vendedores no pueden consultar esos datos.
 
 ## Compras y recepción por lote
 
@@ -61,7 +61,7 @@ La funcion usa la clave segura de Supabase en el servidor; nunca la copies a las
 1. Ejecuta `migrations/202608130013_product_catalog_and_scanner.sql` y después `migrations/202608130014_prevent_duplicate_catalog_products.sql`.
 2. Ya no se ingresan equipos directamente desde **Inventario**. En **Catálogo** se crea el producto completo (marca, modelo y capacidad o potencia); después se selecciona en **Compras** y se agrega al lote.
 3. El catálogo incluye iPhone 14 en adelante, Galaxy S24 en adelante y cargadores USB-C por potencia. Marca + modelo + capacidad/potencia es una combinación única: THOR no permite crear el mismo producto dos veces.
-4. Si llega un modelo que no está en la lista, el Administrador o Superadministrador crea primero el modelo y luego el producto con su capacidad o potencia.
+4. Si llega un modelo que no está en la lista, el Gerente General o Superadministrador crea primero el modelo y luego el producto con su capacidad o potencia.
 5. Para equipos serializados, **Compras** permite escanear el código de barras del IMEI desde la cámara cuando el navegador lo soporta. Si Safari no ofrece la lectura automática, se conserva el ingreso manual o por lector Bluetooth.
 
 ## Recuperacion de contrasena

@@ -4,8 +4,8 @@
 
 | Rol | Alcance principal |
 | --- | --- |
-| Superadministrador | Configura sedes, crea administradores y vendedores, consulta actividad/bitácora y controla toda la operación. |
-| Administrador | Opera inventario, catálogo, compras, proveedores, clientes, caja y ventas de las sedes disponibles. Crea vendedores, no administradores. |
+| Superadministrador | Configura sedes, crea Gerentes Generales y vendedores, consulta actividad/bitácora y controla toda la operación. |
+| Gerente General | Opera inventario, catálogo, compras, proveedores, clientes, caja y ventas de todas las sedes. Crea vendedores, no Gerentes Generales. |
 | Vendedor | Opera únicamente en su sede: abre/cierra su caja, consulta inventario, registra clientes y confirma ventas. |
 
 ## Inicio y seguridad
@@ -105,8 +105,8 @@ selecciona al crear un lote de compra y queda asociado a su factura/pago.
 
 ## Usuarios
 
-- Superadministrador: crea administradores y vendedores, y puede cambiar roles.
-- Administrador: crea solo vendedores.
+- Superadministrador: crea Gerentes Generales y vendedores, y puede cambiar roles.
+- Gerente General: crea solo vendedores.
 - Cada vendedor debe tener sede asignada antes de iniciar.
 - Cada perfil puede incluir foto.
 

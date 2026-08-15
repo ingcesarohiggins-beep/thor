@@ -80,4 +80,4 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Las cuentas se crean dentro del módulo **Usuarios**. El Superadmin puede crear vendedores y administradores; el Administrador solo puede crear vendedores.
+Las cuentas se crean dentro del módulo **Usuarios**. El Superadministrador puede crear vendedores y Gerentes Generales; el Gerente General solo puede crear vendedores.

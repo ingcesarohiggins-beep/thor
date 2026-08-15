@@ -75,9 +75,9 @@ El Superadministrador realiza estos pasos una sola vez:
    corresponde y confirma que aparece la sede activa.
 2. **Crear sedes.** Mantén `Almacén Central` para tesorería/almacén central y
    crea cada tienda o almacén que operará ventas.
-3. **Crear usuarios.** Crea administradores y vendedores. Cada vendedor debe
+3. **Crear usuarios.** Crea Gerentes Generales y vendedores. Cada vendedor debe
    quedar asignado a una sede. El Superadministrador es el único que puede crear
-   administradores.
+   Gerentes Generales.
 4. **Revisar categorías de egreso.** En Caja, el Superadministrador puede
    activar, desactivar o crear categorías antes de empezar a registrar gastos.
 5. **Crear catálogo.** En Catálogo selecciona un modelo y su capacidad/potencia.
@@ -89,7 +89,7 @@ El Superadministrador realiza estos pasos una sola vez:
 
 ## 4. Primera compra real
 
-1. El administrador elige la sede que recibirá el stock.
+1. El Gerente General elige la sede que recibirá el stock.
 2. En **Compras**, crea una llegada: proveedor, número de factura/guía, origen
    del pago, flete y comprobante si lo tiene.
 3. Agrega al lote productos ya creados en Catálogo.
@@ -122,7 +122,7 @@ El Superadministrador realiza estos pasos una sola vez:
 1. Revisa ventas y gastos de cada sede.
 2. Registra los egresos con una categoría y método de pago reales.
 3. Cada vendedor registra el efectivo contado y cierra su propia caja.
-4. El administrador revisa diferencias y el Superadministrador consulta la
+4. El Gerente General revisa diferencias y el Superadministrador consulta la
    bitácora, usuarios conectados y actividad.
 
 ## 7. Soporte y seguridad

@@ -1151,7 +1151,7 @@ export default function Home() {
               {actor?.role === "superadmin"
                 ? "Superadministrador"
                 : actor?.role === "admin"
-                  ? "Administrador general"
+                  ? "Gerente General"
                   : actor?.role === "seller"
                     ? "Vendedor"
                     : "Cargando"}
@@ -1262,7 +1262,7 @@ export default function Home() {
                   {actor?.role === "superadmin"
                     ? "Superadministrador"
                     : actor?.role === "admin"
-                      ? "Administrador general"
+                      ? "Gerente General"
                       : "Vendedor"}
                 </small>
               </div>
@@ -4337,7 +4337,7 @@ function CashCenter({
             )}
             </>
           ) : (
-            <p className="empty">Los gastos los registra un administrador.</p>
+            <p className="empty">Los gastos los registra un Gerente General o el Superadministrador.</p>
           )}
         </section>
       </div>
@@ -4753,7 +4753,7 @@ function QuickGuide({
         }
       : role === "admin"
         ? {
-            title: "Guía rápida para administrador",
+            title: "Guía rápida para Gerente General",
             description:
               "Supervisa la operación diaria de tu sede: inventario, ventas y caja.",
             action: "Ver inventario",
@@ -4786,7 +4786,7 @@ function QuickGuide({
     );
   } else {
     guide.steps.unshift(
-      "Crea administradores y revisa que cada vendedor tenga una sede correctamente asignada.",
+      "Crea Gerentes Generales y revisa que cada vendedor tenga una sede correctamente asignada.",
     );
   }
   return (
@@ -4949,7 +4949,7 @@ function UserCenter({
           <h3>Crear acceso desde THOR</h3>
           <p>
             {actor.role === "superadmin"
-              ? "Puedes crear vendedores y administradores."
+              ? "Puedes crear vendedores y Gerentes Generales."
               : "Puedes crear vendedores y asignarlos a cualquier sede."}
           </p>
           <form onSubmit={createUser} className="invite-form">
@@ -4982,7 +4982,7 @@ function UserCenter({
                 {actor.role === "superadmin" ? (
                   <select name="role" defaultValue="seller">
                     <option value="seller">Vendedor</option>
-                    <option value="admin">Administrador</option>
+                    <option value="admin">Gerente General</option>
                   </select>
                 ) : (
                   <input readOnly value="Vendedor" />
@@ -5028,12 +5028,12 @@ function UserCenter({
           <p className="eyebrow">COMO DAR ACCESO</p>
           <h3>Acceso controlado</h3>
           <ol>
-            <li>El administrador registra correo y contrasena.</li>
+            <li>El Gerente General registra correo y contrasena.</li>
             <li>THOR crea la cuenta con el rol seleccionado.</li>
             <li>La persona ingresa con las credenciales que le entregues.</li>
           </ol>
           <p>
-            El Superusuario crea administradores. El Administrador general puede
+            El Superusuario crea Gerentes Generales. El Gerente General puede
             crear vendedores para cualquier almacén, pero no eleva roles.
           </p>
         </section>
@@ -5072,13 +5072,13 @@ function UserCenter({
                     aria-label={`Rol de ${user.name}`}
                   >
                     <option value="seller">Vendedor</option>
-                    <option value="admin">Administrador</option>
+                    <option value="admin">Gerente General</option>
                   </select>
                 ) : user.role === "superadmin" ? (
                   <span className="badge neutral">Superadmin</span>
                 ) : (
                   <span className="badge neutral">
-                    {user.role === "admin" ? "Administrador" : "Vendedor"}
+                    {user.role === "admin" ? "Gerente General" : "Vendedor"}
                   </span>
                 )}
                 <span
@@ -5249,7 +5249,7 @@ function roleName(role: string) {
   return role === "superadmin"
     ? "Superadministrador"
     : role === "admin"
-      ? "Administrador"
+      ? "Gerente General"
       : role === "seller"
         ? "Vendedor"
         : "Sistema";
@@ -5328,7 +5328,7 @@ function ManualCenter({
         }
       : role === "admin"
         ? {
-            name: "Administrador",
+            name: "Gerente General",
             purpose: "Mantener la operación de la sede ordenada y verificable.",
             steps: [
               "Crea el producto en Catálogo y recíbelo desde Compras con su lote, factura, IMEI y evidencia fotográfica cuando sea un equipo.",
@@ -5408,7 +5408,7 @@ function ManualCenter({
     ],
     [
       "Usuarios y sedes",
-      "El superadministrador crea administradores; los administradores crean vendedores para cada almacén.",
+      "El Superadministrador crea Gerentes Generales; los Gerentes Generales crean vendedores para cada almacén.",
       "Activo",
     ],
   );
@@ -5424,11 +5424,11 @@ function ManualCenter({
             "Puedes cambiar la sede operativa desde el menú lateral y revisar cada almacén.",
             "Puedes crear vendedores para cualquier sede, controlar inventario, ventas, caja y gastos.",
             "Puedes recibir lotes de proveedores y pagar desde caja de sede, caja central o tesorería.",
-            "No puedes crear administradores ni cambiar privilegios de usuarios.",
+            "No puedes crear Gerentes Generales ni cambiar privilegios de usuarios.",
           ]
         : [
             "Controlas usuarios, roles y la operación completa de todas las sedes.",
-            "Puedes crear administradores y vendedores con su almacén asignado.",
+            "Puedes crear Gerentes Generales y vendedores con su almacén asignado.",
             "Eres responsable de mantener los permisos y manuales actualizados.",
           ];
   return (
