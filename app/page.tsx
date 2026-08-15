@@ -1524,7 +1524,9 @@ export default function Home() {
           />
         )}
         {section === "proveedores" && actor && <SupplierCenter actor={actor} />}
-        {section === "usuarios" && actor && <UserCenter actor={actor} />}
+        {section === "usuarios" && actor && (
+          <UserCenter actor={actor} activitySessionKey={activitySessionKey} />
+        )}
         {section === "manuales" && (
           <ManualCenter
             role={actor?.role as UserRole | undefined}
@@ -4084,8 +4086,10 @@ function QuickGuide({
 
 function UserCenter({
   actor,
+  activitySessionKey,
 }: {
   actor: { id: string; name: string; role: string; locationId: string };
+  activitySessionKey: string;
 }) {
   const supabase = getSupabaseBrowser();
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -4365,12 +4369,14 @@ function UserCenter({
           <p className="empty">Aun no hay usuarios cargados.</p>
         )}
       </section>
-      {actor.role === "superadmin" && <SuperAdminActivity />}
+      {actor.role === "superadmin" && (
+        <SuperAdminActivity activitySessionKey={activitySessionKey} />
+      )}
     </div>
   );
 }
 
-function SuperAdminActivity() {
+function SuperAdminActivity({ activitySessionKey }: { activitySessionKey: string }) {
   const supabase = getSupabaseBrowser();
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
@@ -4379,6 +4385,14 @@ function SuperAdminActivity() {
 
   const load = useCallback(async () => {
     if (!supabase) return;
+    const presence = await supabase.rpc("touch_thor_activity", {
+      p_session_key: activitySessionKey,
+      p_action: "superadmin.monitoring",
+    });
+    if (presence.error) {
+      setMessage("No se pudo registrar la actividad de esta sesión.");
+      return;
+    }
     const [activity, audit] = await Promise.all([
       supabase.rpc("get_superadmin_activity"),
       supabase.rpc("get_superadmin_audit_log", { p_limit: 60 }),
@@ -4390,7 +4404,7 @@ function SuperAdminActivity() {
     setActiveUsers((activity.data ?? []) as ActiveUser[]);
     setAuditEntries((audit.data ?? []) as AuditEntry[]);
     setMessage("");
-  }, [supabase]);
+  }, [activitySessionKey, supabase]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
