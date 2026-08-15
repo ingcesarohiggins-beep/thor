@@ -5370,7 +5370,12 @@ function ManualCenter({
       "Vigente",
     ],
   ];
-  modules.splice(2, 1, [
+  modules.splice(2, 0, [
+    "Venta asistida",
+    "Busca por modelo, GB, código o IMEI. Escanea una unidad para seleccionarla y revisa las sugerencias opcionales de cargador/cable.",
+    "Activo",
+  ]);
+  modules.splice(3, 1, [
     "Caja",
     "Cada usuario abre y cierra su propia caja; sin una sesión abierta no se puede confirmar una venta.",
     "Activo",

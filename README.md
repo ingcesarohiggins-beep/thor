@@ -53,6 +53,20 @@ Las pruebas actuales validan cálculos de venta y pagos combinados. El flujo de 
 
 La clave Publishable/Anon es la que usa la aplicación. No se necesita ni se debe subir la clave `service_role` a GitHub.
 
+## Manuales de entrega
+
+- `docs/GUIA_DE_ENTREGA_Y_PRIMEROS_PASOS.md`: preparación, reinicio seguro y
+  orden para empezar una operación desde cero.
+- `docs/MANUAL_OPERATIVO_COMPLETO.md`: procedimientos de todos los módulos y
+  roles.
+- `docs/PRUEBAS_DEMO.md`: guía de QA y limpieza exclusiva de datos DEMO/QA.
+
+Para dejar una entrega completamente vacía, usa
+`supabase/reset_operational_data.sql` junto con su línea de confirmación. Este
+reinicio conserva usuarios, sedes, plantillas de catálogo y categorías, pero
+elimina todos los datos operativos. Verifica el resultado con
+`supabase/verify_empty_start.sql`.
+
 ## Desarrollo local
 
 ```powershell
