@@ -1941,6 +1941,8 @@ function CatalogCenter() {
   );
 }
 
+// Kept temporarily as a minimal fallback implementation for restricted browsers.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -2022,6 +2024,97 @@ function ImeiScanner({ onDetected }: { onDetected: (value: string) => void }) {
           >
             Cerrar cámara
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImeiCameraScanner({ onDetected }: { onDetected: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let stopped = false;
+    let controls: { stop: () => void } | null = null;
+    const start = async () => {
+      try {
+        if (!videoRef.current || stopped) return;
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        const reader = new BrowserMultiFormatReader();
+        controls = await reader.decodeFromConstraints(
+          {
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          },
+          videoRef.current,
+          (result) => {
+            const value = result?.getText().trim();
+            if (value && !stopped) {
+              onDetected(value);
+              setOpen(false);
+            }
+          },
+        );
+      } catch {
+        setMessage(
+          "No se pudo abrir la cámara. Autoriza el permiso o ingresa el IMEI manualmente.",
+        );
+      }
+    };
+    void start();
+    return () => {
+      stopped = true;
+      controls?.stop();
+    };
+  }, [onDetected, open]);
+
+  return (
+    <div className="imei-scanner">
+      <button
+        className="text-button"
+        type="button"
+        onClick={() => {
+          setMessage("");
+          setOpen(true);
+        }}
+      >
+        Escanear IMEI
+      </button>
+      {open && (
+        <div className="scanner-backdrop" role="presentation">
+          <div
+            className="scanner-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Escanear IMEI"
+          >
+            <div className="scanner-head">
+              <div>
+                <p className="eyebrow">LECTOR DE IMEI</p>
+                <strong>Apunta al código de barras</strong>
+              </div>
+              <button
+                className="scanner-close"
+                type="button"
+                aria-label="Cerrar cámara"
+                onClick={() => setOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <video ref={videoRef} muted playsInline />
+            <p>
+              {message ||
+                "La lectura se completa automáticamente. Si no aparece, escribe el IMEI manualmente."}
+            </p>
+          </div>
         </div>
       )}
     </div>
@@ -2666,7 +2759,7 @@ function PurchaseCenter({
                   <label className="identifiers-field">
                   <span className="imei-label">
                     IMEI o serie{" "}
-                    <ImeiScanner
+                      <ImeiCameraScanner
                       onDetected={(value) =>
                         setLine((current) => ({
                           ...current,
