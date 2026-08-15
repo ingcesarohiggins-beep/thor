@@ -2529,6 +2529,18 @@ p {
   margin: 0;
   border-bottom: 1px solid var(--line);
 }
+.recent-lots .cash-list {
+  padding: 0 20px;
+}
+.recent-lots .cash-list article {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.recent-lots .cash-list small {
+  max-width: 460px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @media (max-width: 1100px) {
   .purchase-fields,
   .purchase-line-grid {
@@ -3029,6 +3041,9 @@ button:disabled {
   .catalog-help { justify-items: start; }
   .catalog-reference-scroll { max-height: 48vh; }
   .purchase-submit .secondary { width: 100%; min-height: 46px; }
+  .recent-lots .cash-list { padding: 0 14px; }
+  .recent-lots .cash-list article { grid-template-columns: minmax(0, 1fr) auto; }
+  .recent-lots .cash-list article .danger { grid-column: 1 / -1; justify-self: start; }
   .expense-category-panel form { grid-template-columns: 1fr; }
   .expense-category-panel form .secondary { width: 100%; }
   input, select, textarea { font-size: 16px; }

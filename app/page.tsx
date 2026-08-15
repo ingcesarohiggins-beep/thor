@@ -2392,7 +2392,15 @@ function PurchaseCenter({
   >([]);
   const [line, setLine] = useState<PurchaseLine>(newPurchaseLine());
   const [savedLines, setSavedLines] = useState<
-    Array<{ sku: string; name: string; quantity: number; amount: number }>
+    Array<{
+      id: string;
+      sku: string;
+      name: string;
+      quantity: number;
+      amount: number;
+      identifiers: string[];
+      photoPaths: string[];
+    }>
   >([]);
   const [saving, setSaving] = useState(false);
   const [optimizingPhoto, setOptimizingPhoto] = useState(false);
@@ -2443,6 +2451,38 @@ function PurchaseCenter({
       setCatalogProducts((productsResult.data ?? []) as CatalogProduct[]);
     }
   }, [actor.locationId, supabase]);
+
+  const loadDraftLines = useCallback(
+    async (lotId: string) => {
+      if (!supabase) return;
+      const result = await supabase
+        .from("receipt_lot_lines")
+        .select("id, quantity, unit_cost, identifiers, item_photo_paths, products(sku, name)")
+        .eq("receipt_lot_id", lotId)
+        .order("created_at");
+      if (result.error) throw result.error;
+      const rows = (result.data ?? []) as Array<{
+        id: string;
+        quantity: number;
+        unit_cost: number;
+        identifiers: string[] | null;
+        item_photo_paths: string[] | null;
+        products: Array<{ sku: string; name: string }> | null;
+      }>;
+      setSavedLines(
+        rows.map((item) => ({
+          id: item.id,
+          sku: item.products?.[0]?.sku ?? "SKU",
+          name: item.products?.[0]?.name ?? "Producto",
+          quantity: Number(item.quantity),
+          amount: Number(item.quantity) * Number(item.unit_cost),
+          identifiers: item.identifiers ?? [],
+          photoPaths: item.item_photo_paths ?? [],
+        })),
+      );
+    },
+    [supabase],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2605,30 +2645,13 @@ function PurchaseCenter({
     setSaving(true);
     setMessage("");
     try {
-      const result = await supabase
-        .from("receipt_lot_lines")
-        .select("quantity, unit_cost, products(sku, name)")
-        .eq("receipt_lot_id", lotId);
-      if (result.error) throw result.error;
-      const rows = (result.data ?? []) as Array<{
-        quantity: number;
-        unit_cost: number;
-        products: Array<{ sku: string; name: string }> | null;
-      }>;
       setSupplierId(lot.supplier_id);
       setReceiptNumber(lot.receipt_number);
       setPaymentMethod(lot.payment_method);
       setFreight(Number(lot.freight_amount || 0));
       setFreightMethod(lot.freight_payment_method || "bank_transfer");
       setFreightNote(lot.freight_description || "");
-      setSavedLines(
-        rows.map((item) => ({
-          sku: item.products?.[0]?.sku ?? "SKU",
-          name: item.products?.[0]?.name ?? "Producto",
-          quantity: Number(item.quantity),
-          amount: Number(item.quantity) * Number(item.unit_cost),
-        })),
-      );
+      await loadDraftLines(lotId);
       setDraft({ id: lot.id, code: lot.code });
       setMessage(
         `Lote ${lot.code} retomado. Puedes continuar agregando mercadería.`,
@@ -2697,15 +2720,7 @@ function PurchaseCenter({
         p_item_photo_paths: itemPhotoPaths,
       });
       if (result.error) throw result.error;
-      setSavedLines((current) => [
-        ...current,
-        {
-          sku: line.sku.trim(),
-          name: line.name.trim(),
-          quantity: Number(line.quantity),
-          amount: Number(line.quantity) * Number(line.unit_cost),
-        },
-      ]);
+      await loadDraftLines(draft.id);
       setLine(newPurchaseLine());
       setMessage(
         "Producto agregado al lote. Puedes añadir otro o confirmar la recepción.",
@@ -2714,6 +2729,27 @@ function PurchaseCenter({
       if (itemPhotoPaths.length)
         await supabase.storage.from("thor-files").remove(itemPhotoPaths);
       setMessage(readableError(error, "No se pudo agregar el producto."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeSavedLine = async (lineToRemove: (typeof savedLines)[number]) => {
+    if (!supabase || !draft) return;
+    if (!window.confirm(`¿Quitar ${lineToRemove.name} del lote?`)) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await supabase.rpc("remove_purchase_lot_line", {
+        p_lot_line_id: lineToRemove.id,
+      });
+      if (result.error) throw result.error;
+      if (lineToRemove.photoPaths.length)
+        await supabase.storage.from("thor-files").remove(lineToRemove.photoPaths);
+      await loadDraftLines(draft.id);
+      setMessage(`${lineToRemove.name} fue retirado del lote. Puedes agregarlo nuevamente corregido.`);
+    } catch (error) {
+      setMessage(readableError(error, "No se pudo retirar el producto del lote."));
     } finally {
       setSaving(false);
     }
@@ -3180,15 +3216,26 @@ function PurchaseCenter({
             </div>
             {savedLines.length ? (
               <div className="cash-list">
-                {savedLines.map((item, index) => (
-                  <article key={`${item.sku}-${index}`}>
+                {savedLines.map((item) => (
+                  <article key={item.id}>
                     <div>
                       <strong>{item.name}</strong>
                       <small>
                         {item.sku} · {item.quantity} unidades
+                        {item.identifiers.length
+                          ? ` · ${item.identifiers.join(", ")}`
+                          : ""}
                       </small>
                     </div>
                     <b>{money.format(item.amount)}</b>
+                    <button
+                      className="text-button danger"
+                      type="button"
+                      onClick={() => void removeSavedLine(item)}
+                      disabled={saving}
+                    >
+                      Quitar
+                    </button>
                   </article>
                 ))}
               </div>
