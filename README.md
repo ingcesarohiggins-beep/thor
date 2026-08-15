@@ -61,6 +61,12 @@ La clave Publishable/Anon es la que usa la aplicación. No se necesita ni se deb
   roles.
 - `docs/PRUEBAS_DEMO.md`: guía de QA y limpieza exclusiva de datos DEMO/QA.
 
+PDFs listos para compartir con el cliente:
+
+- `output/pdf/THOR_Guia_de_Entrega_y_Primeros_Pasos.pdf`
+- `output/pdf/THOR_Manual_Operativo_Completo.pdf`
+- `output/pdf/THOR_Guia_de_Pruebas_DEMO.pdf`
+
 Para dejar una entrega completamente vacía, usa
 `supabase/reset_operational_data.sql` junto con su línea de confirmación. Este
 reinicio conserva usuarios, sedes, plantillas de catálogo y categorías, pero
