@@ -312,6 +312,7 @@ export default function Home() {
   });
   const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
   const [salesView, setSalesView] = useState<"new" | "history">("new");
+  const [mobileSaleView, setMobileSaleView] = useState<"products" | "checkout">("products");
   const [cashOpen, setCashOpen] = useState(false);
   const [idleWarning, setIdleWarning] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -880,6 +881,38 @@ export default function Home() {
       ),
     [stock, query],
   );
+  const saleItems = useMemo(() => {
+    const grouped = new Map<string, StockItem[]>();
+    items.forEach((item) => {
+      const key = `${item.kind}:${item.productId}`;
+      grouped.set(key, [...(grouped.get(key) ?? []), item]);
+    });
+    return [...grouped.values()]
+      .map((group) => {
+        const first = group[0];
+        const availableQty =
+          first.kind === "Equipo"
+            ? group.filter(
+                (item) => !cart.some((cartItem) => cartItem.id === item.id),
+              ).length
+            : first.availableQty;
+        return { ...first, availableQty };
+      })
+      .filter((item) => item.availableQty > 0);
+  }, [cart, items]);
+  const addSaleItemToCart = (item: StockItem) => {
+    if (item.kind === "Equipo") {
+      const nextUnit = stock.find(
+        (candidate) =>
+          candidate.kind === "Equipo" &&
+          candidate.productId === item.productId &&
+          !cart.some((cartItem) => cartItem.id === candidate.id),
+      );
+      if (nextUnit) addToCart(nextUnit);
+      return;
+    }
+    addToCart(item);
+  };
   const total = calculateCartTotal(cart);
   const paid = paymentTotal(payments);
   if (!supabase) return <SetupNeeded />;
@@ -1301,7 +1334,7 @@ export default function Home() {
           />
         )}
         {section === "ventas" && (
-          <div className="sale-layout">
+          <div className={`sale-layout sale-mobile-${mobileSaleView}`}>
             <section className="catalog">
               <div className="sale-section-head">
                 <div>
@@ -1333,6 +1366,22 @@ export default function Home() {
               </div>
               {salesView === "new" ? (
                 <>
+                  <div className="mobile-sale-switch" role="tablist" aria-label="Paso de venta">
+                    <button
+                      type="button"
+                      className={mobileSaleView === "products" ? "selected" : ""}
+                      onClick={() => setMobileSaleView("products")}
+                    >
+                      Productos
+                    </button>
+                    <button
+                      type="button"
+                      className={mobileSaleView === "checkout" ? "selected" : ""}
+                      onClick={() => setMobileSaleView("checkout")}
+                    >
+                      Cobrar {cart.length ? `(${cart.length})` : ""}
+                    </button>
+                  </div>
                   <label className="search">
                     ⌕
                     <input
@@ -1342,11 +1391,11 @@ export default function Home() {
                     />
                   </label>
                   <div className="sale-products">
-                    {items.map((item) => (
+                    {saleItems.map((item) => (
                       <button
                         className="sale-product"
-                        key={item.id}
-                        onClick={() => addToCart(item)}
+                        key={`${item.kind}:${item.productId}`}
+                        onClick={() => addSaleItemToCart(item)}
                       >
                         <strong>{item.name}</strong>
                         <small>
@@ -1364,6 +1413,17 @@ export default function Home() {
             </section>
             <aside className="cart">
               <form onSubmit={completeSale}>
+                <div className="mobile-sale-switch cart-switch" role="tablist" aria-label="Paso de venta">
+                  <button
+                    type="button"
+                    onClick={() => setMobileSaleView("products")}
+                  >
+                    ← Productos
+                  </button>
+                  <button type="button" className="selected">
+                    Cobrar {cart.length ? `(${cart.length})` : ""}
+                  </button>
+                </div>
                 <p className="eyebrow">VENTA NUEVA</p>
                 <h2>Confirmar venta</h2>
                 <div className="customer">
@@ -1787,6 +1847,8 @@ function CatalogCenter() {
   const [templateId, setTemplateId] = useState("");
   const [variant, setVariant] = useState("");
   const [customOpen, setCustomOpen] = useState(false);
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const template = templates.find((item) => item.id === templateId);
@@ -1803,6 +1865,13 @@ function CatalogCenter() {
             variant.toLocaleLowerCase() &&
           product.category === template.category,
       ),
+  );
+  const visibleProducts = products.filter((product) =>
+    [product.brand, product.name, product.variant, product.sku]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase()
+      .includes(catalogQuery.toLocaleLowerCase()),
   );
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -2027,12 +2096,28 @@ function CatalogCenter() {
         <div className="card-head">
           <div>
             <p className="eyebrow">PRODUCTOS DISPONIBLES</p>
-            <h3>Selecciona estos productos desde Compras</h3>
+            <h3>Usa estos productos desde Compras</h3>
           </div>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => setReferencesOpen((current) => !current)}
+          >
+            {referencesOpen ? "Ocultar lista" : `Ver lista (${products.length})`}
+          </button>
         </div>
-        {products.length ? (
-          <div className="catalog-reference-list">
-            {products.map((product) => (
+        {referencesOpen && products.length ? (
+          <>
+            <label className="catalog-reference-search">
+              Buscar en catálogo
+              <input
+                value={catalogQuery}
+                onChange={(event) => setCatalogQuery(event.target.value)}
+                placeholder="Marca, modelo, capacidad o SKU"
+              />
+            </label>
+          <div className="catalog-reference-list catalog-reference-scroll">
+            {visibleProducts.map((product) => (
               <article key={product.id}>
                 <div>
                   <strong>
@@ -2050,10 +2135,16 @@ function CatalogCenter() {
                 <span className="badge neutral">Activa</span>
               </article>
             ))}
+            {!visibleProducts.length && (
+              <p className="empty">No hay coincidencias en el catálogo.</p>
+            )}
           </div>
+          </>
         ) : (
           <p className="empty">
-            Aún no creaste productos. Elige un modelo y capacidad arriba.
+            {products.length
+              ? "La lista está cerrada para que la pantalla no se haga interminable."
+              : "Aún no creaste productos. Elige un modelo y capacidad arriba."}
           </p>
         )}
       </section>
@@ -4997,7 +5088,7 @@ function ManualCenter({
     ],
     [
       "Ventas",
-      "Preparar la venta, registrar pagos y confirmar el descuento de stock.",
+      "Busca productos agrupados, añade las unidades disponibles, pasa a Cobrar en móvil y confirma el descuento de stock.",
       "Activo",
     ],
     [

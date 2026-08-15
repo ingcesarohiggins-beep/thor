@@ -1315,6 +1315,7 @@ p {
   grid-template-columns: repeat(2, minmax(180px, 1fr));
   gap: 12px;
 }
+.mobile-sale-switch { display: none; }
 .sale-product {
   background: #fff;
   border: 1px solid var(--line);
@@ -1816,6 +1817,43 @@ p {
   .sale-products {
     grid-template-columns: 1fr 1fr;
   }
+  .mobile-sale-switch {
+    position: sticky;
+    z-index: 8;
+    top: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    margin: 0 0 12px;
+    padding: 5px;
+    border: 1px solid #e0e7e2;
+    border-radius: 10px;
+    background: #f4f7f5f5;
+    backdrop-filter: blur(10px);
+  }
+  .mobile-sale-switch button {
+    min-height: 39px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .mobile-sale-switch button.selected {
+    background: #fff;
+    color: var(--ink);
+    box-shadow: 0 2px 7px #19312916;
+  }
+  .sale-layout.sale-mobile-checkout .catalog,
+  .sale-layout.sale-mobile-products .cart {
+    display: none;
+  }
+  .sale-layout.sale-mobile-checkout .cart {
+    border-top: 0;
+    padding-top: 16px;
+  }
+  .cart-switch { margin-bottom: 16px; }
   .directory-hero {
     display: block;
     padding: 20px;
@@ -2253,6 +2291,28 @@ p {
 .catalog-reference-list article:last-child { border-bottom: 0; }
 .catalog-reference-list strong, .catalog-reference-list small { display: block; }
 .catalog-reference-list small { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.catalog-reference-search {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.catalog-reference-search input {
+  min-height: 42px;
+  border: 1px solid #d6ddd8;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+}
+.catalog-reference-scroll {
+  max-height: 390px;
+  overflow: auto;
+  padding-right: 4px;
+}
 .pending-lots {
   margin-bottom: 1.25rem;
 }
@@ -2967,6 +3027,7 @@ button:disabled {
   }
   .catalog-product-picker { padding: 13px; }
   .catalog-help { justify-items: start; }
+  .catalog-reference-scroll { max-height: 48vh; }
   .purchase-submit .secondary { width: 100%; min-height: 46px; }
   .expense-category-panel form { grid-template-columns: 1fr; }
   .expense-category-panel form .secondary { width: 100%; }
